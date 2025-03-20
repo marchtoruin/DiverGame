@@ -32,7 +32,10 @@ class GameScene extends Phaser.Scene {
         this.physics.world.on('worldbounds', this.handleWorldBounds, this);
         
         // Create collision groups to better manage collisions
-        this.physics.world.enableBody(this.physics.world.debugGraphic);
+        // Only enable debug body if debug graphics are available
+        if (this.physics.config.debug && this.physics.world.debugGraphic) {
+            this.physics.world.enableBody(this.physics.world.debugGraphic);
+        }
         
         console.log('Physics system initialized');
     }
