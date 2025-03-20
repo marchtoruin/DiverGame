@@ -1,6 +1,4 @@
 import Phaser from 'phaser';
-import backgroundImg from './assets/underwater_bg.png';
-import midLayerImg from './assets/mid_layer_bg.png';
 import diverImg from './assets/diver2.png';
 import airPocket1Img from './assets/air_pocket1.png';
 import airPocket2Img from './assets/air_pocket2.png';
@@ -9,12 +7,39 @@ import rockImg from './assets/rock2.png';
 import rock3Img from './assets/rock3.png';
 import bubbleImg from './assets/bubble.png';
 import bgMusic from './assets/music/bg_music.mp3';
+import ambienceMusic from './assets/music/ambience_underwater.wav';
+import underwaterBg from './assets/underwater_bg.png';  // This is correct - in the assets folder
+import blackAndBlueImg from './assets/BlackNblues.png';  // Add this import
+import level1Data from './assets/maps/level1.json';  // Re-enable the import
+
+// Remove the direct import
+// import level1Data from './assets/maps/level1.json';
 
 class GameScene extends Phaser.Scene {
     constructor() {
-        super('GameScene');
+        super({ 
+            key: 'GameScene'
+        });
+        
+        // Configure physics separately in the init method
         this.isMuted = false;
         this.musicVolume = 0.5; // Default volume
+    }
+    
+    init() {
+        // Configure physics system with proper settings
+        this.physics.world.setBounds(0, 0, 1600, 1200); // Default until map loads
+        this.physics.world.on('worldbounds', this.handleWorldBounds, this);
+        
+        // Create collision groups to better manage collisions
+        this.physics.world.enableBody(this.physics.world.debugGraphic);
+        
+        console.log('Physics system initialized');
+    }
+    
+    handleWorldBounds(body) {
+        // We don't want entities to collide with world bounds, so this method is now empty
+        return false;
     }
 
     preload() {
@@ -27,153 +52,233 @@ class GameScene extends Phaser.Scene {
             console.log('All assets loaded successfully');
         });
 
-        // Load all assets
-        this.load.image('background', backgroundImg);
-        this.load.image('middle_layer', midLayerImg);
+        // Load all images first with their explicit keys that match the Tiled tileset names
+        this.load.image('Blue_background', underwaterBg);
+        this.load.image('blackAndBlue', blackAndBlueImg);
+        
+        // Other images
         this.load.image('player', diverImg);
         this.load.image('air_pocket1', airPocket1Img);
         this.load.image('air_pocket2', airPocket2Img);
         this.load.image('air_pocket3', airPocket3Img);
-        this.load.image('obstacle', rockImg);
-        this.load.image('rock3', rock3Img);
+        this.load.image('rock', rockImg);
+        this.load.image('obstacle', rock3Img);
         this.load.image('bubble', bubbleImg);
         
-        // Load background music using imported asset
-        this.load.audio('bgMusic', bgMusic);
+        // Load audio
+        this.load.audio('music', bgMusic);
+        this.load.audio('ambience', ambienceMusic);
         
-        // TODO: Load the new layer images once you have them
-        // this.load.image('middle_layer', middleLayerImg);
-        // this.load.image('foreground', foregroundImg);
+        // Load the tilemap JSON file
+        this.load.tilemapTiledJSON('level1', level1Data);
     }
 
     create() {
+        console.log("Creating map from tilemap JSON data");
+        
+        try {
+            // Create the map from the loaded JSON file
+            this.map = this.make.tilemap({ key: 'level1' });
+            
+            // Debug: Log layer information
+            if (this.map && this.map.layers) {
+                console.log('Map loaded. Layers:', this.map.layers.map(layer => layer.name));
+                console.log('Tilemap layer count:', this.map.layers.length);
+                console.log('Map object layers:', this.map.objects ? this.map.objects.map(layer => layer.name) : 'None');
+                console.log('Map object layer count:', this.map.objects ? this.map.objects.length : 0);
+                
+                if (this.map.objects && this.map.objects.length > 0) {
+                    this.map.objects.forEach((layer, index) => {
+                        console.log(`Object layer ${index}: name=${layer.name}, objects=${layer.objects ? layer.objects.length : 0}`);
+                    });
+                }
+                
+                // Log tileset info for debugging
+                console.log('Tileset info:', this.map.tilesets.map(tileset => ({
+                    name: tileset.name,
+                    firstgid: tileset.firstgid,
+                    tileCount: tileset.total,
+                    image: tileset.image
+                })));
+                
+                // Detailed inspection of tileset data
+            } else {
+                console.error('Map not loaded properly or has no layers');
+            }
+        } catch (error) {
+            console.error('Error creating map:', error);
+            // Create a fallback map
+            this.createFallbackMap();
+        }
+        
         // Add music system
         this.setupMusicSystem();
 
-        // Make the world 2 screens wide and 8 screens tall
-        const worldWidth = 1600 * 2;  // 2 screens wide (3200 pixels)
-        const worldHeight = 1200 * 8; // 8 screens tall (9600 pixels)
-        this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
+        // Create the tilemap (this is our new background)
+        this.createTiledMap();
 
-        // Create background layers
-        this.createParallaxBackground(worldWidth, worldHeight);
+        console.log("World bounds set to:", this.physics.world.bounds.width, this.physics.world.bounds.height);
 
-        // Create obstacles first so they appear behind the player
-        console.log('Creating obstacles...');
-        this.obstacles = this.physics.add.staticGroup();
+        // Find player spawn point from the map
+        this.playerSpawnPoint = this.findPlayerSpawn();
+        console.log("Player spawn point set to:", this.playerSpawnPoint.x, this.playerSpawnPoint.y);
         
-        // Create background rocks (rock2) in the middle layer
-        const smallRocks = [];
-        for (let i = 0; i < 60; i++) { // Increased for vertical world
-            smallRocks.push({
-                x: Phaser.Math.Between(200, worldWidth - 200),
-                y: Phaser.Math.Between(200, worldHeight - 200)
+        // IMPORTANT: We will NOT validate or adjust the spawn point - player must spawn EXACTLY where placed in Tiled
+        
+        // Create player at the spawn point from the map
+        console.log('Creating player at spawn position:', this.playerSpawnPoint.x, this.playerSpawnPoint.y);
+        
+        this.player = this.physics.add.sprite(
+            this.playerSpawnPoint.x, 
+            this.playerSpawnPoint.y,
+            'player'
+        );
+        
+        console.log("Player created at:", this.player.x, this.player.y);
+        
+        // CRITICAL FIX: Ensure player has proper physics body for collisions
+        this.player.setCollideWorldBounds(false);
+        
+        // IMPORTANT: Set a proper sized hitbox - adjusted to match sprite visible area better
+        // We need a larger hitbox as the image shows the player needs a bigger collision area
+        this.player.body.setSize(80, 120, true); // Increased from 70x100 to better match the sprite
+        this.player.body.setOffset(5, 5); // Adjusted to better center the hitbox on the sprite
+        
+        // Configure other physics properties for the player
+        this.player.setDrag(100);
+        this.player.setMaxVelocity(300);  // Restoring original velocity
+        this.player.setDepth(3); // Player should be above obstacle layer
+
+        // Make the player's physics body more reliable for collisions
+        this.player.body.setBounce(0.1); // Add slight bounce like air pockets
+        this.player.body.setFriction(0.1, 0.1);
+        
+        // CRITICAL FIX FOR COLLISION DETECTION: Make player immovable = true like air pockets
+        // This is likely why air pockets collide but player doesn't
+        this.player.body.setImmovable(true);  // Set to true like air pockets
+        this.player.body.pushable = false;   // Match air pocket settings
+
+        // IMPORTANT: Set overflow check to prevent tunneling through objects
+        // This ensures multiple checks per step for fast-moving objects
+        this.physics.world.TILE_BIAS = 64; // Increase the tile bias (default is 16)
+
+        // Make the player's physics body more visible in debug mode
+        if (this.physics.config.debug) {
+            this.player.body.debugBodyColor = 0x0088ff; // Bright blue for player body
+            this.player.body.debugShowBody = true;
+            this.player.body.debugShowVelocity = true;
+            console.log('Enhanced player physics debug enabled');
+        }
+        
+        // Add debug info for player body
+        console.log('Player physics body:', {
+            width: this.player.body.width,
+            height: this.player.body.height,
+            offsetX: this.player.body.offset.x,
+            offsetY: this.player.body.offset.y,
+            enabled: this.player.body.enable
+        });
+
+        // Initialize the air pockets group
+        console.log('Creating air pockets...');
+        this.airPockets = this.physics.add.group();
+
+        // IMPORTANT: Explicitly clear any existing physics group colliders
+        // This ensures no leftover collision data persists
+        if (this.physics.world.colliders) {
+            console.log('Cleaning up any existing physics colliders for air pockets');
+            this.physics.world.colliders.getActive().forEach(collider => {
+                if (collider.object1 === this.airPockets || 
+                    (Array.isArray(collider.object1) && collider.object1.includes(this.airPockets)) ||
+                    collider.object2 === this.airPockets || 
+                    (Array.isArray(collider.object2) && collider.object2.includes(this.airPockets))) {
+                    this.physics.world.removeCollider(collider);
+                    console.log('Removed old air pocket collider');
+                }
             });
         }
-
-        // Add small rocks to middle layer
-        smallRocks.forEach(pos => {
-            const rock = this.add.image(pos.x, pos.y, 'obstacle')
-                .setScrollFactor(0.6) // Match middle layer scroll factor
-                .setDepth(0.2) // Lower depth so they appear behind large rocks
-                .setAlpha(0.85); // Slightly reduce opacity to enhance depth effect
-        });
         
-        // Create large rocks (rock3) as physical obstacles
-        const largeRockPositions = [];
-        const numRocks = 15; // Reduced from 25 to 15
-        const numSections = 5; // Divide world into 5 vertical sections
-        const rocksPerSection = Math.ceil(numRocks / numSections);
-        const sectionHeight = (worldHeight - 1200) / numSections; // Height per section (excluding top screen)
-
-        for (let section = 0; section < numSections; section++) {
-            for (let i = 0; i < rocksPerSection; i++) {
-                const sectionY = 1200 + (section * sectionHeight);
-                largeRockPositions.push({
-                    x: Phaser.Math.Between(400, worldWidth - 400),
-                    y: sectionY + Phaser.Math.Between(200, sectionHeight - 200)
-                });
-            }
-        }
-
-        // Shuffle the positions array to randomize rock placement within sections
-        Phaser.Utils.Array.Shuffle(largeRockPositions);
+        // Track spawned locations and respawn timers
+        this.airPocketSpawnPoints = [];
         
-        // Only use the first 15 positions
-        largeRockPositions.slice(0, 15).forEach(pos => {
-            const rock = this.obstacles.create(pos.x, pos.y, 'rock3');
-            rock.body.setSize(250, 200);
-            rock.body.setOffset(73, 150);
-            rock.setScrollFactor(1);
-            rock.setDepth(1);
-        });
-
-        // Create player with proper depth - start near top
-        console.log('Creating player...');
-        this.player = this.physics.add.sprite(worldWidth / 2, 600, 'player');
-        this.player.setCollideWorldBounds(true);
-        this.player.body.setSize(84, 112);
-        this.player.setOffset(0, 0);
-        this.player.setDrag(100);  // Reduced drag from 150 to 100 for more momentum
-        this.player.setMaxVelocity(300);  // Increased max velocity from 250 to 300
-        this.player.setDepth(2);
-
+        // Spawn air pockets from Tiled map only
+        this.spawnTiledAirPockets();
+        
         // Create player bubble trail
-        this.add.particles(0, 0, 'bubble', {
+        this.bubbleEmitter = this.add.particles(0, 0, 'bubble', {
             follow: this.player,
-            followOffset: { x: 0, y: -40 },
+            followOffset: { x: 10, y: -32 },
             lifespan: 3000,
             gravityY: -50,
             speed: { min: 40, max: 80 },
-            scale: { start: 0.15, end: 0.05 },
+            scale: { start: 0.1, end: 0.02 },
             alpha: { start: 0.6, end: 0 },
             angle: { min: 250, max: 290 },
             rotate: { min: -180, max: 180 },
-            frequency: 500,
+            frequency: 300,
+            quantity: 1,
             emitZone: { 
                 type: 'random',
-                source: new Phaser.Geom.Circle(0, 0, 10)
+                source: new Phaser.Geom.Circle(10, -32, 5)
             }
-        });
+        }).setDepth(3.5);
+
+        // Create a separate emitter for movement bursts
+        this.movementBurstEmitter = this.add.particles(0, 0, 'bubble', {
+            follow: this.player,
+            followOffset: { x: 0, y: 0 },
+            lifespan: 1500,
+            gravityY: -100,
+            speed: { min: 80, max: 120 },
+            scale: { start: 0.1, end: 0.02 },
+            alpha: { start: 0.8, end: 0 },
+            angle: { min: 180, max: 360 },
+            rotate: { min: -180, max: 180 },
+            frequency: 500,
+            quantity: 0,
+            emitZone: { 
+                type: 'random',
+                source: new Phaser.Geom.Circle(0, 0, 20)
+            }
+        }).setDepth(3.5);
+        
+        // Player movement tracking
+        this.playerMovement = {
+            prevDirection: { x: 0, y: 0 },
+            isMoving: false,
+            lastBurstTime: 0
+        };
 
         // Set up camera to follow player
-        this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+        this.cameras.main.setBounds(0, 0, this.physics.world.bounds.width, this.physics.world.bounds.height);
         this.cameras.main.startFollow(this.player);
         this.cameras.main.setDeadzone(200, 200);
 
-        // Add air pockets spread across the world
-        console.log('Creating air pockets...');
-        this.airPockets = this.physics.add.group();
-        this.createAirPockets(worldWidth, worldHeight);
+        // Add debug visualization for world boundaries
+        if (this.physics.config.debug) {
+            const worldBounds = this.physics.world.bounds;
+            const worldBoundaryGraphics = this.add.graphics();
+            worldBoundaryGraphics.lineStyle(4, 0x00ff00, 1); // Green line, 4px width
+            worldBoundaryGraphics.strokeRect(
+                worldBounds.x, 
+                worldBounds.y, 
+                worldBounds.width, 
+                worldBounds.height
+            );
+            console.log('World boundary visualization enabled');
+        }
 
-        // Add collisions and overlaps
-        this.physics.add.collider(this.player, this.obstacles);
-        this.physics.add.overlap(this.player, this.airPockets, this.refillOxygen, null, this);
-
-        // Add collisions between air pockets and obstacles
-        this.physics.add.collider(this.airPockets, this.obstacles, (airPocket, obstacle) => {
-            // Calculate collision normal (direction of bounce)
-            const dx = airPocket.x - obstacle.x;
-            const dy = airPocket.y - obstacle.y;
-            const angle = Math.atan2(dy, dx);
-            
-            // Get current velocity components
-            const velocity = new Phaser.Math.Vector2(airPocket.body.velocity.x, airPocket.body.velocity.y);
-            const speed = velocity.length();
-            
-            // Calculate new velocity after bounce
-            const bounceSpeed = speed * 0.8;  // Maintain 80% of speed after bounce
-            const minUpwardSpeed = 80;  // Minimum upward speed to maintain
-            
-            // Apply new velocity with bounce direction
-            let newVelX = Math.cos(angle) * bounceSpeed;
-            let newVelY = Math.sin(angle) * bounceSpeed;
-            
-            // Ensure minimum upward velocity
-            newVelY = Math.min(newVelY, -minUpwardSpeed);
-            
-            airPocket.setVelocity(newVelX, newVelY);
-        });
+        // Add overlap for oxygen refill
+        this.physics.add.overlap(
+            this.player, 
+            this.airPockets, 
+            this.refillOxygen, 
+            (player, airPocket) => {
+                // Only allow overlap if both objects exist and are active
+                return player && player.active && airPocket && airPocket.active;
+            }, 
+            this
+        );
 
         // Create UI elements that stay fixed to the camera
         this.maxOxygen = 100;
@@ -193,6 +298,16 @@ class GameScene extends Phaser.Scene {
         oxygenText.setScrollFactor(0);
         oxygenText.setDepth(10); // Set high depth value
 
+        // Add hint text for R key to respawn air pockets
+        const respawnHint = this.add.text(20, 120, 'Press R to respawn air pockets', { 
+            font: '24px Arial', 
+            color: '#ffffff',
+            backgroundColor: '#000000',
+            padding: { x: 5, y: 5 }
+        });
+        respawnHint.setScrollFactor(0);
+        respawnHint.setDepth(10);
+
         // Set up controls
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keys = {
@@ -201,173 +316,26 @@ class GameScene extends Phaser.Scene {
             left: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
             right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
         };
-    }
 
-    createParallaxBackground(worldWidth, worldHeight) {
-        // Calculate how many tiles we need for each layer
-        const bgWidth = 1600;  // 2x original size
-        const bgHeight = 1200; // 2x original size
-        const tilesX = Math.ceil(worldWidth / bgWidth) + 1; // +1 for seamless scrolling
-        const tilesY = Math.ceil(worldHeight / bgHeight) + 1;
-
-        // Create container for background layers
-        this.backgroundLayers = {
-            far: [],
-            middle: [],
-            front: []
-        };
-
-        // Create far background layer (slowest moving)
-        for (let x = 0; x < tilesX; x++) {
-            for (let y = 0; y < tilesY; y++) {
-                const bg = this.add.image(x * bgWidth, y * bgHeight, 'background')
-                    .setOrigin(0, 0)
-                    .setScrollFactor(0.3); // Moves at 0.3x speed
-                this.backgroundLayers.far.push(bg);
+        // Add key listener for X to fix collision
+        this.input.keyboard.on('keydown-X', () => {
+            console.log('X key pressed - Fixing collision data');
+            this.fixTiledCollisions();
+            if (this.playerObstacleCollider) {
+                this.physics.world.removeCollider(this.playerObstacleCollider);
             }
-        }
-
-        // Create middle layer (medium speed)
-        for (let x = 0; x < tilesX; x++) {
-            for (let y = 0; y < tilesY; y++) {
-                const middle = this.add.image(x * bgWidth, y * bgHeight, 'middle_layer')
-                    .setOrigin(0, 0)
-                    .setScrollFactor(0.6)
-                    .setAlpha(0.25); // 25% opacity
-                this.backgroundLayers.middle.push(middle);
-            }
-        }
-
-        // TODO: Once you have the foreground image
-        // Create foreground layer (fastest moving)
-        /*for (let x = 0; x < tilesX; x++) {
-            for (let y = 0; y < tilesY; y++) {
-                const front = this.add.image(x * bgWidth, y * bgHeight, 'foreground')
-                    .setOrigin(0, 0)
-                    .setScrollFactor(0.9); // Moves at 0.9x speed
-                this.backgroundLayers.front.push(front);
-            }
-        }*/
-    }
-
-    createAirPockets(worldWidth, worldHeight) {
-        this.airPockets.clear(true, true);
-        
-        // Create zones with moderate spacing, but avoid the starting area
-        const zoneSize = 1600;
-        const zones = [];
-        const startAreaX = 800;
-        const startAreaY = 600;
-        const safeRadius = 800;
-        
-        // Generate spawn points across the world, avoiding the start area
-        for (let x = zoneSize; x < worldWidth - zoneSize; x += zoneSize) {
-            // Only create zones in the bottom third of the world
-            const y = worldHeight - zoneSize;
-            
-            // Calculate distance from start position
-            const distanceFromStart = Phaser.Math.Distance.Between(x, y, startAreaX, startAreaY);
-            
-            // Only add zones that are outside the safe radius
-            if (distanceFromStart > safeRadius) {
-                zones.push({
-                    minX: x - 400,
-                    maxX: x + 400,
-                    minY: y - 200,
-                    maxY: y
-                });
-            }
-        }
-
-        // Create initial air pockets in valid zones
-        zones.forEach(zone => {
-            if (Phaser.Math.Between(1, 3) === 1) { // 33% spawn chance
-                const x = Phaser.Math.Between(zone.minX, zone.maxX);
-                const y = Phaser.Math.Between(zone.minY, zone.maxY);
-                this.createSingleAirPocket(x, y);
-            }
+            this.playerObstacleCollider = this.physics.add.collider(
+                this.player,
+                this.obstaclesLayer
+            );
+            console.log('Collision system completely rebuilt');
         });
 
-        // Set up periodic spawning of new air pockets
-        this.time.addEvent({
-            delay: 6000, // Spawn every 6 seconds
-            callback: () => {
-                // Get camera view bounds
-                const cam = this.cameras.main;
-                const camBounds = {
-                    left: cam.scrollX,
-                    right: cam.scrollX + cam.width,
-                    top: cam.scrollY,
-                    bottom: cam.scrollY + cam.height
-                };
-                
-                // Always spawn from bottom, but outside camera view
-                const x = Phaser.Math.Between(200, worldWidth - 200);
-                const y = camBounds.bottom + 300; // Spawn well below the camera view
-                
-                // Only spawn if the position is within world bounds
-                if (y < worldHeight - 100) {
-                    this.createSingleAirPocket(x, y);
-                }
-            },
-            loop: true
+        // Add key listener for R to respawn all air pockets
+        this.input.keyboard.on('keydown-R', () => {
+            console.log('R key pressed - Respawning all air pockets');
+            this.respawnAllAirPockets();
         });
-    }
-
-    createSingleAirPocket(x, y) {
-        const airPocketType = Phaser.Math.Between(1, 3);
-        const airPocket = this.airPockets.create(x, y, `air_pocket${airPocketType}`);
-        airPocket.setScale(0.165);
-        airPocket.setScrollFactor(1);
-        airPocket.setDepth(1);
-        
-        // Set up collision box
-        const originalWidth = airPocket.width;
-        const originalHeight = airPocket.height;
-        airPocket.body.setSize(originalWidth * 0.65, originalHeight * 0.65);
-        airPocket.body.setOffset(75, 75);
-        
-        // Set physics properties for better bouncing
-        airPocket.setBounce(0.8);  // Higher bounce for more reactive collisions
-        airPocket.setDrag(0);      // No drag to maintain momentum
-        airPocket.setFriction(0);  // No friction
-        airPocket.body.setAllowGravity(false);  // Disable gravity
-        
-        // Set initial velocity with slight randomness
-        airPocket.setVelocity(
-            Phaser.Math.Between(-20, 20),  // Small random horizontal velocity
-            -100  // Consistent upward movement
-        );
-        
-        // Create bubble trail
-        airPocket.particles = this.add.particles(0, 0, 'bubble', {
-            follow: airPocket,
-            followOffset: { x: 0, y: 0 },
-            lifespan: 2500,
-            gravityY: -200,
-            speed: { min: 150, max: 200 },
-            scale: { start: 0.2, end: 0.1 },
-            alpha: { start: 0.6, end: 0 },
-            angle: { min: 265, max: 275 },
-            frequency: 80,
-            emitZone: { 
-                type: 'random',
-                source: new Phaser.Geom.Circle(0, -20, 25)
-            },
-            quantity: 2
-        }).setDepth(0);
-
-        // Add gentle rotation
-        this.tweens.add({
-            targets: airPocket,
-            angle: Phaser.Math.Between(-10, 10),
-            duration: 2500,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.easeInOut'
-        });
-
-        return airPocket;
     }
 
     update(time, delta) {
@@ -375,6 +343,159 @@ class GameScene extends Phaser.Scene {
         if (!this.player.active || !this.player.body) {
             console.log('Player inactive or missing body!');
             return;
+        }
+
+        // IMPROVED DEBUG VISUALIZATION: Track collisions in real-time
+        if (this.physics.config.debug && this.player && this.player.body && this.obstaclesLayer) {
+            // Find the tile at the player's current position
+            const tileX = Math.floor(this.player.x / this.map.tileWidth);
+            const tileY = Math.floor(this.player.y / this.map.tileHeight);
+            
+            // Check surrounding tiles (3x3 grid centered on player)
+            let collidingTiles = 0;
+            let collisionText = "";
+            
+            // Add debugging for world bounds
+            const inWorldBounds = this.player.x >= 0 && 
+                                this.player.x <= this.physics.world.bounds.width &&
+                                this.player.y >= 0 && 
+                                this.player.y <= this.physics.world.bounds.height;
+            
+            // Create or update debug text for player body
+            if (!this.playerBodyDebugText) {
+                this.playerBodyDebugText = this.add.text(10, 250, '', { 
+                    font: '14px Arial', 
+                    fill: '#ffff00',
+                    backgroundColor: '#000000',
+                    padding: { x: 5, y: 5 }
+                }).setScrollFactor(0).setDepth(100);
+            }
+            
+            // Update player physics body debug info
+            this.playerBodyDebugText.setText(
+                `Player body: ${this.player.body.width}x${this.player.body.height} @ (${this.player.body.offset.x},${this.player.body.offset.y})\n` +
+                `Immovable: ${this.player.body.immovable}, Pushable: ${!this.player.body.pushable}\n` +
+                `Velocity: (${Math.floor(this.player.body.velocity.x)},${Math.floor(this.player.body.velocity.y)})`
+            );
+            
+            // Check if player is overlapping with any obstacle tiles
+            let playerOverlappingObstacle = false;
+            const playerBounds = this.player.getBounds();
+            
+            for (let y = tileY - 1; y <= tileY + 1; y++) {
+                for (let x = tileX - 1; x <= tileX + 1; x++) {
+                    const tile = this.obstaclesLayer.getTileAt(x, y);
+                    if (tile && tile.index !== -1) {
+                        // Calculate tile bounds
+                        const tileBounds = {
+                            x: tile.x * this.map.tileWidth,
+                            y: tile.y * this.map.tileHeight,
+                            width: this.map.tileWidth,
+                            height: this.map.tileHeight
+                        };
+                        
+                        // Check for overlap between player and this tile
+                        if (Phaser.Geom.Rectangle.Overlaps(playerBounds, tileBounds)) {
+                            playerOverlappingObstacle = true;
+                            collidingTiles++;
+                            
+                            // Highlight this tile with a bright flash
+                            this.time.delayedCall(0, () => {
+                                const highlightGraphics = this.add.graphics();
+                                highlightGraphics.fillStyle(0xff0000, 0.5);
+                                highlightGraphics.fillRect(
+                                    x * this.map.tileWidth, 
+                                    y * this.map.tileHeight,
+                                    this.map.tileWidth,
+                                    this.map.tileHeight
+                                );
+                                
+                                this.time.delayedCall(300, () => {
+                                    highlightGraphics.destroy();
+                                });
+                            });
+                            
+                            collisionText += `Tile at (${x},${y}) index=${tile.index}\n`;
+                        }
+                    }
+                }
+            }
+            
+            // If player is stuck in a wall, try to push them out
+            if (playerOverlappingObstacle && !this.noClipMode) {
+                console.log("EMERGENCY: Player detected inside obstacle - attempting to fix position");
+                
+                // Find nearest non-colliding position
+                const directions = [
+                    { x: 0, y: -1 }, // Up
+                    { x: 0, y: 1 },  // Down
+                    { x: -1, y: 0 }, // Left
+                    { x: 1, y: 0 },  // Right
+                    { x: -1, y: -1 }, // Up-Left
+                    { x: 1, y: -1 },  // Up-Right
+                    { x: -1, y: 1 },  // Down-Left
+                    { x: 1, y: 1 }    // Down-Right
+                ];
+                
+                // Try each direction with increasing distance
+                let foundSafePosition = false;
+                for (let distance = 1; distance <= 5 && !foundSafePosition; distance++) {
+                    for (const dir of directions) {
+                        const testX = this.player.x + (dir.x * this.map.tileWidth * distance);
+                        const testY = this.player.y + (dir.y * this.map.tileHeight * distance);
+                        
+                        // Check if this position is valid (not inside an obstacle)
+                        if (this.isPositionValid(testX, testY)) {
+                            // Move player to safe position
+                            this.player.x = testX;
+                            this.player.y = testY;
+                            this.player.body.reset(testX, testY);
+                            foundSafePosition = true;
+                            console.log(`Moved player to safe position: (${testX}, ${testY})`);
+                            break;
+                        }
+                    }
+                }
+                
+                if (!foundSafePosition) {
+                    // If we couldn't find a safe position, just respawn the player
+                    console.log("Could not find safe position - respawning player");
+                    this.respawnPlayer();
+                }
+            }
+            
+            // Check for key press to toggle noclip mode (allow player to pass through obstacles)
+            const zKey = this.input.keyboard.addKey('Z');
+            if (Phaser.Input.Keyboard.JustDown(zKey)) {
+                // Toggle no-clip mode
+                this.noClipMode = !this.noClipMode;
+                
+                if (this.noClipMode) {
+                    // Disable all collision for the player
+                    if (this.playerObstacleCollider) {
+                        this.playerObstacleCollider.active = false;
+                    }
+                    console.log("NO CLIP MODE ENABLED - Player can pass through obstacles");
+                } else {
+                    // Re-enable collision
+                    if (this.playerObstacleCollider) {
+                        this.playerObstacleCollider.active = true;
+                    }
+                    console.log("NO CLIP MODE DISABLED - Normal collision restored");
+                }
+            }
+            
+            // Update the collision debug text
+            if (this.playerDebugText) {
+                this.playerDebugText.setText(
+                    `Player pos: (${Math.floor(this.player.x)},${Math.floor(this.player.y)})\n` +
+                    `Tile pos: (${tileX},${tileY})\n` +
+                    `Colliding tiles: ${collidingTiles}\n` +
+                    `In world bounds: ${inWorldBounds}\n` +
+                    `NoClip mode: ${this.noClipMode ? 'ON (Z)' : 'OFF (Z)'}\n` +
+                    collisionText
+                );
+            }
         }
 
         // Update oxygen
@@ -389,41 +510,132 @@ class GameScene extends Phaser.Scene {
 
         this.oxygenBar.width = (this.currentOxygen / this.maxOxygen) * 400;
 
+        // Check spawn points from Tiled map to see if any need respawning
+        this.airPocketSpawnPoints.forEach((spawnPoint, index) => {
+            if (!spawnPoint.active && (time - spawnPoint.lastSpawnTime) >= spawnPoint.spawnRate) {
+                // Check if this position is still valid (not inside an obstacle)
+                if (this.isPositionValid(spawnPoint.x, spawnPoint.y)) {
+                    // Time to respawn this air pocket
+                    const airPocket = this.createSingleAirPocket(spawnPoint.x, spawnPoint.y, spawnPoint.variation);
+                    
+                    // Store the spawn point index on the air pocket for reference
+                    airPocket.spawnPointIndex = index;
+                    
+                    // Mark as active
+                    spawnPoint.active = true;
+                    spawnPoint.lastSpawnTime = time;
+                    
+                    console.log(`Respawned air pocket at (${spawnPoint.x}, ${spawnPoint.y}) with variation ${spawnPoint.variation}`);
+                }
+            }
+        });
+
         // Ensure player position stays within world bounds
         this.player.x = Phaser.Math.Clamp(this.player.x, 0, this.physics.world.bounds.width);
         this.player.y = Phaser.Math.Clamp(this.player.y, 0, this.physics.world.bounds.height);
 
+        // Track current movement direction
+        let currentDirection = { x: 0, y: 0 };
+
         // Movement controls
         if (this.cursors.left.isDown || this.keys.left.isDown) {
-            this.player.setAccelerationX(-300);  // Increased from -200 to -300
+            this.player.setAccelerationX(-300);
             this.player.setFlipX(true);
+            currentDirection.x = -1;
         } else if (this.cursors.right.isDown || this.keys.right.isDown) {
-            this.player.setAccelerationX(300);   // Increased from 200 to 300
+            this.player.setAccelerationX(300);
             this.player.setFlipX(false);
+            currentDirection.x = 1;
         } else {
             this.player.setAccelerationX(0);
         }
 
         if (this.cursors.up.isDown || this.keys.up.isDown) {
-            this.player.setAccelerationY(-300);  // Increased from -200 to -300
+            this.player.setAccelerationY(-300);
+            currentDirection.y = -1;
         } else if (this.cursors.down.isDown || this.keys.down.isDown) {
-            this.player.setAccelerationY(300);   // Increased from 200 to 300
+            this.player.setAccelerationY(300);
+            currentDirection.y = 1;
         } else {
             this.player.setAccelerationY(0);
         }
+        
+        // IMPORTANT: Apply velocity clamping to prevent fast tunneling through obstacles
+        const maxSpeed = 300; // Restored to original speed
+        const vx = Phaser.Math.Clamp(this.player.body.velocity.x, -maxSpeed, maxSpeed);
+        const vy = Phaser.Math.Clamp(this.player.body.velocity.y, -maxSpeed, maxSpeed);
+        this.player.setVelocity(vx, vy);
+        
+        // Check for movement state changes (starting to move or changing direction)
+        const isMovingNow = currentDirection.x !== 0 || currentDirection.y !== 0;
+        const directionChanged = 
+            currentDirection.x !== this.playerMovement.prevDirection.x || 
+            currentDirection.y !== this.playerMovement.prevDirection.y;
+        
+        // Start moving or change direction burst effect
+        if ((isMovingNow && (!this.playerMovement.isMoving || directionChanged)) && 
+            (time - this.playerMovement.lastBurstTime > 500)) { // Limit bursts to every 500ms
+            
+            // Emit a burst of bubbles
+            this.emitMovementBurst(currentDirection);
+            this.playerMovement.lastBurstTime = time;
+        }
+        
+        // Update player movement state
+        this.playerMovement.isMoving = isMovingNow;
+        this.playerMovement.prevDirection.x = currentDirection.x;
+        this.playerMovement.prevDirection.y = currentDirection.y;
 
-        // Check for and remove out-of-bounds air pockets
+        // REMOVED: The periodic air pocket boost is no longer needed with the new continuous physics model
+
+        // Check for and remove out-of-bounds air pockets with safety checks
+        if (this.airPockets) {
         this.airPockets.getChildren().forEach(airPocket => {
-            if (airPocket.y < 0) {
+                // Skip processing if the air pocket is no longer valid
+                if (!airPocket || !airPocket.active || !airPocket.body) return;
+                
+                // Only remove the air pocket if it's very far outside the map
+                if (airPocket.y < -500 || 
+                    airPocket.y > this.physics.world.bounds.height + 500 ||
+                    airPocket.x < -500 || 
+                    airPocket.x > this.physics.world.bounds.width + 500) {
+                    
+                // If this was from a spawn point, mark it as inactive so it can respawn
+                if (airPocket.spawnPointIndex !== undefined) {
+                    const spawnPoint = this.airPocketSpawnPoints[airPocket.spawnPointIndex];
+                    if (spawnPoint) {
+                        spawnPoint.active = false;
+                        spawnPoint.lastSpawnTime = time;
+                    }
+                }
+                
                 if (airPocket.particles) {
                     airPocket.particles.destroy();
+                    }
+                    
+                    // Safely remove air pocket
+                    if (airPocket.obstacleLayerCollider) {
+                        this.physics.world.removeCollider(airPocket.obstacleLayerCollider);
+                    }
+                    airPocket.destroy();
                 }
-                airPocket.destroy();
+                    });
+                }
             }
-        });
+
+    // Method to update debug graphics
+    updateDebugGraphics() {
+        // No longer using custom collision objects
+        // This method has been deprecated
+        return;
     }
 
     refillOxygen(player, airPocket) {
+        // Safety check - ensure both objects still exist
+        if (!player || !player.active || !airPocket || !airPocket.active) {
+            return;
+        }
+        
         this.currentOxygen = this.maxOxygen;
         
         // Create burst effect using the same particle system style
@@ -447,6 +659,16 @@ class GameScene extends Phaser.Scene {
         this.time.delayedCall(1000, () => {
             burstEffect.destroy();
         });
+        
+        // If this is a fixed spawn point from our Tiled map, mark it as inactive so it can respawn
+        if (airPocket.spawnPointIndex !== undefined) {
+            // Find the spawn point and mark as inactive
+            const spawnPoint = this.airPocketSpawnPoints[airPocket.spawnPointIndex];
+            if (spawnPoint) {
+                spawnPoint.active = false;
+                spawnPoint.lastSpawnTime = this.time.now;
+            }
+        }
 
         // Clean up the air pocket and its particles
         if (airPocket.particles) {
@@ -457,32 +679,56 @@ class GameScene extends Phaser.Scene {
 
     gameOver() {
         if (this.player.active) { // Only run game over once
-            this.add.text(800, 600, 'Game Over', { font: '48px Arial', color: '#ffffff' }).setOrigin(0.5);
+            // Display game over text
+            const gameOverText = this.add.text(800, 600, 'Game Over', { 
+                font: '48px Arial', 
+                color: '#ffffff',
+                backgroundColor: '#000000',
+                padding: { x: 20, y: 10 }
+            }).setOrigin(0.5).setDepth(10);
+            
+            // Deactivate the player temporarily
             this.player.setActive(false);
             this.player.setVisible(false);
+            
+            // Make sure to remove the physics body to prevent interactions
             if (this.player.body) {
                 this.physics.world.remove(this.player);
             }
+            
+            // After a delay, respawn the player (3 seconds)
+            this.time.delayedCall(3000, () => {
+                this.respawnPlayer();
+                gameOverText.destroy();
+            });
         }
     }
 
     setupMusicSystem() {
         try {
-            // Create background music if audio loaded successfully
-            if (this.cache.audio.exists('bgMusic')) {
-                // Create the audio instance
+            // Create audio instances if loaded successfully
+            if (this.cache.audio.exists('bgMusic') && this.cache.audio.exists('ambienceMusic')) {
+                // Create the background music instance
                 this.backgroundMusic = this.sound.add('bgMusic', {
-                    volume: this.musicVolume,
+                    volume: this.musicVolume * 0.7, // Slightly lower volume for background music
                     loop: true
                 });
 
-                // Start playing the music
+                // Create the ambient underwater sounds instance
+                this.ambienceSound = this.sound.add('ambienceMusic', {
+                    volume: 1, // Lower volume for ambient sounds
+                    loop: true
+                });
+
+                // Start playing both audio tracks
                 if (!this.sound.locked) {
                     this.backgroundMusic.play();
+                    this.ambienceSound.play();
                 } else {
                     // If audio is locked (common on mobile), wait for user interaction
                     this.sound.once('unlocked', () => {
                         this.backgroundMusic.play();
+                        this.ambienceSound.play();
                     });
                 }
 
@@ -511,14 +757,27 @@ class GameScene extends Phaser.Scene {
                     .setDepth(10)
                     .setInteractive();
 
+                // Add debug button for respawning all air pockets
+                const respawnButton = this.add.text(1300, 20, '🔄 Air', volumeStyle)
+                    .setScrollFactor(0)
+                    .setDepth(10)
+                    .setInteractive();
+                
+                respawnButton.on('pointerdown', () => {
+                    this.respawnAllAirPockets();
+                    console.log('Debug: Respawning all air pockets');
+                });
+
                 // Handle mute toggle
                 muteButton.on('pointerdown', () => {
                     this.isMuted = !this.isMuted;
                     if (this.isMuted) {
                         this.backgroundMusic.setVolume(0);
+                        this.ambienceSound.setVolume(0);
                         muteButton.setText('🔈');
                     } else {
-                        this.backgroundMusic.setVolume(this.musicVolume);
+                        this.backgroundMusic.setVolume(this.musicVolume * 0.7);
+                        this.ambienceSound.setVolume(0.3);
                         muteButton.setText('🔊');
                     }
                 });
@@ -527,22 +786,1168 @@ class GameScene extends Phaser.Scene {
                 volumeDown.on('pointerdown', () => {
                     this.musicVolume = Math.max(0, this.musicVolume - 0.1);
                     if (!this.isMuted) {
-                        this.backgroundMusic.setVolume(this.musicVolume);
+                        this.backgroundMusic.setVolume(this.musicVolume * 0.7);
+                        // Also adjust ambience volume proportionally
+                        this.ambienceSound.setVolume(this.musicVolume * 0.6);
                     }
                 });
 
                 volumeUp.on('pointerdown', () => {
                     this.musicVolume = Math.min(1, this.musicVolume + 0.1);
                     if (!this.isMuted) {
-                        this.backgroundMusic.setVolume(this.musicVolume);
+                        this.backgroundMusic.setVolume(this.musicVolume * 0.7);
+                        // Also adjust ambience volume proportionally
+                        this.ambienceSound.setVolume(this.musicVolume * 0.6);
                     }
                 });
             } else {
-                console.warn('Background music not loaded successfully');
+                console.warn('Audio tracks not loaded successfully');
             }
         } catch (error) {
             console.error('Error setting up music system:', error);
         }
+    }
+
+    createTiledMap() {
+        // First check if we have a valid map
+        if (!this.map) {
+            console.warn('No map data available. Using fallback.');
+            this.createFallbackMap();
+            return;
+        }
+        
+        try {
+            console.log('Creating tilemap with available data');
+            
+            // Load the tilesets, specifying exactly what image keys to use
+            console.log('Adding tileset images with correct keys...');
+            const bgTileset = this.map.addTilesetImage('Blue_background', 'Blue_background');
+            const blackBlueTileset = this.map.addTilesetImage('blackAndBlue', 'blackAndBlue');
+            
+            // Log the results
+            console.log('Background tileset loaded:', !!bgTileset);
+            console.log('BlackAndBlue tileset loaded:', !!blackBlueTileset);
+            
+            if (!bgTileset && !blackBlueTileset) {
+                console.error('Failed to load any tilesets. Using fallback map.');
+                this.createFallbackMap();
+                return;
+            }
+            
+            // Create an array of available tilesets
+            const tilesets = [];
+            if (bgTileset) tilesets.push(bgTileset);
+            if (blackBlueTileset) tilesets.push(blackBlueTileset);
+            
+            // Get and log the layer names
+            const mapLayers = this.map.layers || [];
+            if (mapLayers.length === 0) {
+                console.error('No layers found in map data');
+                this.createFallbackMap();
+                return;
+            }
+            
+            // Debug log all layer names
+            const layerNames = mapLayers.map(layer => layer.name);
+            console.log('Available map layers:', layerNames);
+            
+            // Try to create each layer by name
+            try {
+                if (layerNames.includes('Background')) {
+                    const backgroundLayer = this.map.createLayer('Background', tilesets);
+                    if (backgroundLayer) {
+                        backgroundLayer.setScrollFactor(0.7);
+                        backgroundLayer.setDepth(1);
+                        console.log('Background layer created successfully');
+                        
+                        // Set world bounds based on the map size
+                        const worldWidth = this.map.widthInPixels;
+                        const worldHeight = this.map.heightInPixels;
+                        this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
+                        console.log('World bounds set to:', worldWidth, worldHeight);
+                        this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+                        
+                        // ADD ROCKS TO BACKGROUND LAYER
+                        this.addRocksToLayer(worldWidth, worldHeight, 0.7, 'rock', 1.2, 10); // rock2.png on background
+                    }
+                } else if (layerNames.length > 0) {
+                    // Use the first layer as background if no "Background" layer exists
+                    const backgroundLayer = this.map.createLayer(layerNames[0], tilesets);
+                    if (backgroundLayer) {
+                        backgroundLayer.setScrollFactor(0.7);
+                        backgroundLayer.setDepth(1);
+                        console.log(`Using layer "${layerNames[0]}" as background`);
+                        
+                        // Set world bounds
+                        const worldWidth = this.map.widthInPixels;
+                        const worldHeight = this.map.heightInPixels;
+                        this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
+                        console.log('World bounds set to:', worldWidth, worldHeight);
+                        this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+                        
+                        // ADD ROCKS TO BACKGROUND LAYER
+                        this.addRocksToLayer(worldWidth, worldHeight, 0.7, 'rock', 1.2, 10); // rock2.png on background
+                    }
+                } else {
+                    throw new Error('No usable layers in map data');
+                }
+            } catch (error) {
+                console.error('Error creating background layer:', error);
+                this.createFallbackMap();
+                return;
+            }
+            
+            // Try to create midground layer if it exists
+            if (layerNames.includes('Midground')) {
+                try {
+                    const midgroundLayer = this.map.createLayer('Midground', tilesets);
+                    if (midgroundLayer) {
+                        midgroundLayer.setScrollFactor(0.85);
+                        midgroundLayer.setAlpha(0.8);
+                        midgroundLayer.setDepth(1.5);
+                        console.log('Midground layer created successfully');
+                        
+                        // ADD ROCKS TO MIDGROUND LAYER
+                        const worldWidth = this.map.widthInPixels;
+                        const worldHeight = this.map.heightInPixels;
+                        this.addRocksToLayer(worldWidth, worldHeight, 0.85, 'obstacle', 1.0, 8); // rock3.png on midground
+                    }
+                } catch (error) {
+                    console.error('Error creating midground layer:', error);
+                }
+            }
+            
+            // SIMPLIFIED APPROACH FOR OBSTACLES LAYER
+            if (layerNames.includes('Obstacles')) {
+                try {
+                    console.log('============= SETTING UP OBSTACLES LAYER =============');
+                    
+                    // Remove existing layer if it exists
+                    if (this.obstaclesLayer) {
+                        console.log('Destroying old obstacle layer');
+                        this.obstaclesLayer.destroy();
+                        this.obstaclesLayer = null;
+                    }
+                    
+                    // Clean up any existing colliders
+                    if (this.playerObstacleCollider) {
+                        this.physics.world.removeCollider(this.playerObstacleCollider);
+                        this.playerObstacleCollider = null;
+                    }
+                    
+                    // Create the obstacles layer
+                    console.log('Creating obstacles layer from Tiled map');
+                    this.obstaclesLayer = this.map.createLayer('Obstacles', tilesets);
+                    
+                    if (this.obstaclesLayer) {
+                        // Set basic display properties
+                        this.obstaclesLayer.setScrollFactor(1);
+                        this.obstaclesLayer.setDepth(2);
+                        
+                        // Make obstacles visible to debug
+                        this.obstaclesLayer.setAlpha(1);
+                        
+                        // SIMPLIFIED COLLISION: Set collision for all non-empty tiles
+                        console.log('Setting collision for non-empty tiles on Obstacles layer');
+                        this.obstaclesLayer.setCollisionByExclusion([-1]);
+                        
+                        // Enable debug visualization if debugging is enabled
+                        if (this.physics.config.debug) {
+                            console.log('Enabling debug visualization for obstacle tiles');
+                            
+                            // Create or replace debug graphics
+                            if (this.tileDebugGraphics) {
+                                this.tileDebugGraphics.destroy();
+                            }
+                            this.tileDebugGraphics = this.add.graphics();
+                            
+                            // Show collision tiles with bright colors
+                            this.obstaclesLayer.renderDebug(this.tileDebugGraphics, {
+                                tileColor: null, // No color for non-colliding tiles
+                                collidingTileColor: new Phaser.Display.Color(255, 0, 255, 1), // Bright magenta for collision tiles
+                                faceColor: new Phaser.Display.Color(255, 255, 0, 1) // Yellow for collision faces
+                            });
+                        }
+                        
+                        // Create player-obstacle collider after a delay to ensure everything is initialized
+                        if (this.player && this.player.body) {
+                            console.log('Creating player-obstacle collider');
+                            
+                            // First clean up any existing collider
+                            if (this.playerObstacleCollider) {
+                                this.physics.world.removeCollider(this.playerObstacleCollider);
+                            }
+                            
+                            // CRITICAL: Ensure player has correct physics properties
+                            // These must match what we set in create() and fixTiledCollisions()
+                            this.player.body.setImmovable(false);
+                            this.player.body.pushable = true;
+                            this.player.body.setBounce(0.1);
+                            
+                            console.log('Player-obstacle collider created with visual feedback');
+                        } else {
+                            console.log('Player not ready yet, collider will be created later');
+                        }
+                    }
+                    
+                    console.log('============= OBSTACLES LAYER SETUP COMPLETE =============');
+                    
+                    // ADD EXACT SAME COLLIDER APPROACH AS AIR POCKETS
+                    // Wait just a moment to ensure everything is initialized
+                    this.time.delayedCall(100, () => {
+                        // First, remove any existing collider for the player
+                        if (this.playerObstacleCollider) {
+                            this.physics.world.removeCollider(this.playerObstacleCollider);
+                        }
+                        
+                        console.log('Creating player obstacle collider using EXACT SAME approach as air pockets');
+                        // Create the collider using the same exact method that works for air pockets
+                        this.playerObstacleCollider = this.physics.add.collider(
+                            this.player,
+                            this.obstaclesLayer
+                        );
+                        
+                        console.log('Player-obstacle collider created with SAME approach as air pockets');
+                    });
+                    
+                } catch (error) {
+                    console.error('Error setting up obstacles layer:', error);
+                }
+            } else {
+                console.error('No Obstacles layer found in the map!');
+            }
+        } catch (error) {
+            console.error('Error in createTiledMap:', error);
+            this.createFallbackMap();
+        }
+    }
+
+    // Add new method to place rock sprites on a specific layer with parallax
+    addRocksToLayer(worldWidth, worldHeight, scrollFactor, rockType, scale, count) {
+        console.log(`Adding ${count} ${rockType} rocks with scroll factor ${scrollFactor}`);
+        
+        // Create rocks group (non-physics)
+        const rocksGroup = this.add.group();
+        
+        // Add rocks randomly distributed across the world
+        for (let i = 0; i < count; i++) {
+            // Calculate random position within world bounds
+            // Add padding to avoid rocks right at the edge
+            const padding = 100;
+            const x = Phaser.Math.Between(padding, worldWidth - padding);
+            const y = Phaser.Math.Between(padding, worldHeight - padding);
+            
+            // Create rock sprite
+            const rock = this.add.sprite(x, y, rockType);
+            
+            // Set appropriate scale - make background rocks larger
+            rock.setScale(scale);
+            
+            // Set scroll factor to match the layer (for parallax effect)
+            rock.setScrollFactor(scrollFactor);
+            
+            // Set depth to match the layer it's on (slightly above to be visible)
+            rock.setDepth(scrollFactor < 0.8 ? 1.1 : 1.6);
+            
+            // REMOVED: All rotation and flips - keep rocks in original default orientation
+            
+            // Add to group for management
+            rocksGroup.add(rock);
+        }
+        
+        return rocksGroup;
+    }
+
+    createFallbackMap() {
+        console.log("Creating fallback map due to tilemap loading failure");
+        
+        // Set world bounds based on our config
+        const worldWidth = 1600;
+        const worldHeight = 1200;
+        this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
+        
+        // Create simple background
+        const background = this.add.image(worldWidth/2, worldHeight/2, 'Blue_background')
+            .setDepth(1)
+            .setScrollFactor(0.7);
+        
+        // Scale image to fit the world
+        background.setDisplaySize(worldWidth, worldHeight);
+        
+        // Set the camera bounds to match
+        this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+        
+        // Add rocks to fallback map too
+        this.addRocksToLayer(worldWidth, worldHeight, 0.7, 'rock', 1.2, 10); // Background rocks
+        this.addRocksToLayer(worldWidth, worldHeight, 0.85, 'obstacle', 1.0, 8); // Midground rocks
+    }
+
+    spawnTiledAirPockets() {
+        // Check if the AirPockets object layer exists
+        const airPocketsLayer = this.map.getObjectLayer('AirPockets');
+        
+        if (!airPocketsLayer) {
+            console.log('No AirPockets layer found in the Tiled map');
+            console.log('Available layers:', this.map.objects ? this.map.objects.map(layer => layer.name) : 'None');
+            return;
+        }
+        
+        console.log('Found AirPockets layer with objects:', airPocketsLayer.objects.length);
+        
+        // Check if the objects array has properties on the LAYER rather than individual objects
+        // This is a common Tiled export pattern where properties are set at the layer level
+        const layerHasProperties = airPocketsLayer.properties && airPocketsLayer.properties.length > 0;
+        let layerType = '';
+        let layerVariation = 1;
+        let layerSpawnRate = 8000; // Default respawn rate in ms (8 seconds)
+        
+        if (layerHasProperties) {
+            // Find properties on the layer itself
+            const typeProperty = airPocketsLayer.properties.find(prop => prop.name === 'type');
+            if (typeProperty) {
+                layerType = typeProperty.value;
+            }
+            
+            const variationProperty = airPocketsLayer.properties.find(prop => prop.name === 'variation');
+            if (variationProperty) {
+                layerVariation = parseInt(variationProperty.value) || 1;
+            }
+            
+            // Look for spawn rate property
+            const spawnRateProperty = airPocketsLayer.properties.find(prop => prop.name === 'spawnRate');
+            if (spawnRateProperty) {
+                layerSpawnRate = parseInt(spawnRateProperty.value) || 8000; 
+            }
+            
+            console.log(`Found layer-level properties: type=${layerType}, variation=${layerVariation}, spawnRate=${layerSpawnRate}ms`);
+        }
+        
+        // Debug: List all object types in this layer
+        let objectTypes = {};
+        airPocketsLayer.objects.forEach(obj => {
+            if (obj.type) {
+                objectTypes[obj.type] = (objectTypes[obj.type] || 0) + 1;
+            } else {
+                objectTypes['no-type'] = (objectTypes['no-type'] || 0) + 1;
+            }
+        });
+        console.log('Object types in AirPockets layer:', objectTypes);
+        
+        // Iterate through all objects in the AirPockets layer
+        airPocketsLayer.objects.forEach(object => {
+            console.log('Processing object:', object);
+            
+            // Check if this is an air pocket type - either by explicit type, checking properties, or layer properties
+            const isAirPocket = object.type === 'air_pocket' || 
+                object.name === 'air_pocket' ||
+                (object.properties && object.properties.some(prop => prop.name === 'type' && prop.value === 'air_pocket')) ||
+                layerType === 'air_pocket';
+            
+            if (isAirPocket) {
+                // Get the variation property (defaulting to 1 if not specified)
+                let variation = layerVariation; // Default to layer variation if available
+                let spawnRate = layerSpawnRate; // Default to layer spawn rate
+                
+                if (object.properties) {
+                    // Find the variation property on the object (overrides layer property)
+                    const variationProp = object.properties.find(prop => prop.name === 'variation');
+                    if (variationProp) {
+                        variation = parseInt(variationProp.value) || 1;
+                        // Ensure variation is within valid range (1-3)
+                        variation = Math.max(1, Math.min(3, variation));
+                    }
+                    
+                    // Check for spawn rate property
+                    const spawnRateProp = object.properties.find(prop => prop.name === 'spawnRate');
+                    if (spawnRateProp) {
+                        spawnRate = parseInt(spawnRateProp.value) || 8000;
+                    }
+                }
+                
+                // Get position (Tiled origin is top-left)
+                const x = object.x;
+                const y = object.y;
+                
+                // IMPORTANT: Check if this position overlaps with an obstacle tile before spawning
+                if (this.obstaclesLayer) {
+                    // Convert pixel coordinates to tile coordinates
+                    const tileX = Math.floor(x / this.map.tileWidth);
+                    const tileY = Math.floor(y / this.map.tileHeight);
+                    
+                    // Get the tile at this position
+                    const tile = this.obstaclesLayer.getTileAt(tileX, tileY);
+                    
+                    // If there's a tile (not empty) at this position, skip spawning the air pocket
+                    if (tile && tile.index !== -1) {
+                        console.log(`Skipping air pocket at (${x}, ${y}) because it overlaps with an obstacle tile`);
+                        return; // Skip to next object
+                    }
+                }
+                
+                console.log(`Spawning air pocket from Tiled: variation ${variation} at (${x}, ${y}) with respawn rate ${spawnRate}ms`);
+                
+                // Create the air pocket at the specified position with the correct variation
+                this.createSingleAirPocket(x, y, variation);
+                
+                // Add this location to our spawn points list for respawning
+                this.airPocketSpawnPoints.push({
+                    x: x,
+                    y: y,
+                    variation: variation,
+                    spawnRate: spawnRate,
+                    active: true,
+                    lastSpawnTime: this.time.now
+                });
+            } else {
+                // Only create fallback air pockets if they are within valid areas (not inside obstacles)
+                // First check if position overlaps with obstacles
+                const x = object.x;
+                const y = object.y;
+                
+                // Check if this position overlaps with an obstacle tile
+                if (this.obstaclesLayer) {
+                    // Convert pixel coordinates to tile coordinates
+                    const tileX = Math.floor(x / this.map.tileWidth);
+                    const tileY = Math.floor(y / this.map.tileHeight);
+                    
+                    // Get the tile at this position
+                    const tile = this.obstaclesLayer.getTileAt(tileX, tileY);
+                    
+                    // If there's a tile at this position, skip spawning the air pocket
+                    if (tile && tile.index !== -1) {
+                        console.log(`Skipping fallback air pocket at (${x}, ${y}) because it overlaps with an obstacle tile`);
+                        return; // Skip to next object
+                    }
+                }
+                
+                // For non-air-pocket objects, assume they are still air pockets based on being in the AirPockets layer
+                let variation = layerVariation; // Use layer variation as default
+                let spawnRate = layerSpawnRate;
+                
+                // Try to find variation from properties
+                if (object.properties) {
+                    const variationProp = object.properties.find(prop => prop.name === 'variation');
+                    if (variationProp) {
+                        variation = parseInt(variationProp.value) || 1;
+                        variation = Math.max(1, Math.min(3, variation));
+                    }
+                    
+                    // Check for spawn rate property
+                    const spawnRateProp = object.properties.find(prop => prop.name === 'spawnRate');
+                    if (spawnRateProp) {
+                        spawnRate = parseInt(spawnRateProp.value) || 8000;
+                    }
+                }
+                
+                console.log(`Spawning fallback air pocket at (${object.x}, ${object.y}) with variation ${variation} and respawn rate ${spawnRate}ms`);
+                this.createSingleAirPocket(object.x, object.y, variation);
+                
+                // Add to spawn points
+                this.airPocketSpawnPoints.push({
+                    x: object.x,
+                    y: object.y,
+                    variation: variation,
+                    spawnRate: spawnRate,
+                    active: true,
+                    lastSpawnTime: this.time.now
+                });
+            }
+        });
+    }
+
+    createSingleAirPocket(x, y, variation = null) {
+        // Safety check - make sure airPockets group exists
+        if (!this.airPockets) {
+            console.error('Air pockets group not initialized');
+            return null;
+        }
+        
+        // Check for required texture keys
+        const airPocketType = variation || Phaser.Math.Between(1, 3);
+        const textureKey = `air_pocket${airPocketType}`;
+        if (!this.textures.exists(textureKey)) {
+            console.error(`Missing texture: ${textureKey}`);
+            return null;
+        }
+        
+        // If variation is not specified, choose randomly between 1-3
+        const airPocket = this.airPockets.create(x, y, textureKey);
+        airPocket.setScale(0.165);
+        airPocket.setScrollFactor(1);
+        airPocket.setDepth(2.5); // Between obstacles and player
+        
+        // Set up collision box - make it smaller for better collision detection
+        const originalWidth = airPocket.width;
+        const originalHeight = airPocket.height;
+        airPocket.body.setSize(originalWidth * 0.5, originalHeight * 0.5);
+        airPocket.body.setOffset(125, 125); // Adjust offset to center the collision box
+        
+        // IMPORTANT: Enable pushing to prevent passing through obstacles
+        airPocket.body.pushable = false;
+        
+        // Ensure air pocket doesn't collide with world boundaries
+        airPocket.body.setCollideWorldBounds(false);
+        
+        // Make air pocket physics body more visible in debug mode
+        if (this.physics.config.debug) {
+            airPocket.body.debugBodyColor = 0xff00ff; // Bright magenta for air pocket body
+            airPocket.body.debugShowBody = true;
+            airPocket.body.debugShowVelocity = true;
+        }
+        
+        // =============== AIR POCKET PHYSICS PARAMETERS ===============
+        // These settings control how air pockets move through the water
+        
+        // BOUNCE: How much the air pocket bounces off obstacles
+        // Range: 0-1 (0 = no bounce, 1 = full bounce)
+        // Higher values make bubbles bounce more aggressively off walls
+        // Lower values create softer, more gentle collisions
+        airPocket.setBounce(0.25);    // Increased bounce for more noticeable reflection (was 0.1)
+        
+        // DRAG: Resistance to movement (simulates water density)
+        // Range: 0-100+ (0 = no resistance, higher = more resistance)
+        // Higher values slow bubbles down faster, lower values allow longer sustained movement
+        // Too high will make bubbles stop quickly, too low will make them slide forever
+        airPocket.setDrag(2);       // ADJUST: Increase to slow bubbles down faster
+        
+        // FRICTION: Resistance to movement along surfaces
+        // Range: 0-1 (0 = frictionless, 1 = high friction)
+        // Controls how easily bubbles slide along obstacles
+        // Lower values allow bubbles to slide more easily along walls
+        airPocket.setFriction(0.01); // ADJUST: Increase to make bubbles stick more to walls
+        
+        // DAMPING: Gradual reduction in velocity over time
+        // This creates a more realistic water-like environment
+        // True = enable damping, False = disable damping
+        airPocket.body.setDamping(true);  // ADJUST: Set to false to disable all damping
+        
+        // DRAG COEFFICIENT: How quickly velocity decreases over time
+        // Range: 0-1 (0 = no damping, 1 = instant stop)
+        // Controls the rate at which bubbles naturally slow down
+        // Smaller values make bubbles maintain speed longer
+        airPocket.body.setDrag(0.005);    // ADJUST: Increase for more water resistance
+        
+        // GRAVITY: Whether bubbles are affected by gravity
+        // Air pockets should float up, so we disable gravity and control their movement manually
+        airPocket.body.setAllowGravity(false);  // Almost always keep this false for bubbles
+        
+        // IMMOVABLE: Whether other objects can move this object during collisions
+        // False allows bubbles to be pushed around by other physics objects
+        // True would make them completely unmovable by collisions
+        airPocket.body.setImmovable(false);  // ADJUST: Set to true to prevent pushing
+        
+        // INITIAL VELOCITY: Starting speed and direction
+        // X velocity: horizontal movement (-left, +right)
+        // Y velocity: vertical movement (-up, +down)
+        // These values control how fast the bubble initially moves
+        const baseSpeed = Phaser.Math.Between(700, 800);  // ADJUST: Reduced to half from 1400-1600
+        const jitter = Phaser.Math.Between(-15, 15);      // Slightly reduced horizontal movement
+        
+        // Set the initial velocity - negative Y means upward in Phaser
+        airPocket.setVelocity(jitter, -baseSpeed);
+        
+        // Store base speed for the continuous buoyancy model
+        // This is used to maintain consistent rising behavior
+        airPocket.baseSpeed = baseSpeed;  // Don't change this line - it stores the value above
+        
+        // =============== NATURAL WOBBLE PARAMETERS ===============
+        // These create the side-to-side wobbling motion for realism
+        
+        // Starting phase of the wobble (in radians)
+        airPocket.wobblePhase = 0;
+        
+        // How fast the wobble cycles
+        // Higher values create faster oscillation, lower values make slower wobbling
+        airPocket.wobbleSpeed = Phaser.Math.FloatBetween(0.02, 0.04);  // Reduced to match slower speed
+        
+        // How far the bubble wobbles side to side
+        // Higher values create wider side-to-side movement
+        airPocket.wobbleAmplitude = Phaser.Math.Between(10, 20);  // Slightly reduced wobble amplitude
+        
+        // =============== CONTINUOUS BUOYANCY SYSTEM ===============
+        // This timer constantly updates the bubble physics for smooth movement
+        
+        this.time.addEvent({
+            // How often to update bubble physics (milliseconds)
+            // Lower values = smoother movement but more CPU usage
+            delay: 50,  // Slightly increased delay for slower movement (was 40)
+            loop: true, // Keep this true to continuously update
+            callback: () => {
+                // Skip if the bubble has been destroyed
+                if (!airPocket || !airPocket.active || !airPocket.body) {
+                    return;
+                }
+                
+                // ---- PHYSICS UPDATE SYSTEM ----
+                
+                // Calculate current upward speed (converted to positive number)
+                const currentSpeed = Math.abs(airPocket.body.velocity.y);
+                
+                // Target speed - bubbles accelerate slightly as they rise (realistic physics)
+                // The 1.05 multiplier means bubbles aim for 5% faster than base speed
+                const targetSpeed = airPocket.baseSpeed * 1.05;  // ADJUST: Increase multiplier for more acceleration
+                
+                // Smooth acceleration toward target speed
+                // Only apply if we're significantly below target speed
+                if (currentSpeed < targetSpeed - 30) {  // Reduced threshold for slower speeds (was 50)
+                    // Calculate proportional acceleration based on how far from target
+                    const speedDiff = targetSpeed - currentSpeed;
+                    // Limit max acceleration to prevent jerky movement
+                    const acceleration = Math.min(speedDiff * 0.1, 15);  // Reduced for gentler acceleration (was 0.15, 25)
+                    
+                    // Apply upward force (negative Y in Phaser means up)
+                    airPocket.body.velocity.y -= acceleration;
+                }
+                
+                // ---- WOBBLE SYSTEM ----
+                
+                // Update wobble phase (creates the oscillation)
+                airPocket.wobblePhase += airPocket.wobbleSpeed;
+                
+                // Calculate horizontal wobble using sine wave
+                const wobbleX = Math.sin(airPocket.wobblePhase) * airPocket.wobbleAmplitude;
+                
+                // Apply horizontal wobble without affecting vertical speed
+                // This preserves upward momentum while adding side-to-side motion
+                const currentVelocityY = airPocket.body.velocity.y;
+                airPocket.body.velocity.x = wobbleX;  // Set horizontal velocity to wobble value
+                airPocket.body.velocity.y = currentVelocityY;  // Preserve vertical velocity
+            }
+        });
+        
+        // Create bubble trail
+        airPocket.particles = this.add.particles(0, 0, 'bubble', {
+            follow: airPocket,
+            followOffset: { x: 0, y: 0 },
+            lifespan: 2500,
+            gravityY: -100,           // Reduced upward gravity (was -200)
+            speed: { min: 80, max: 120 }, // Reduced speed (was 150-200)
+            scale: { start: 0.2, end: 0.1 },
+            alpha: { start: 0.6, end: 0 },
+            angle: { min: 265, max: 275 },
+            frequency: 120,           // Reduced emission frequency (was 80)
+            emitZone: { 
+                type: 'random',
+                source: new Phaser.Geom.Circle(0, -20, 25)
+            },
+            quantity: 1               // Reduced quantity (was 2)
+        }).setDepth(2);
+
+        // Add gentle rotation with more variation
+        this.tweens.add({
+            targets: airPocket,
+            angle: Phaser.Math.Between(-5, 5),  // ADJUST: Increase for more rotation
+            duration: Phaser.Math.Between(2000, 3000),  // ADJUST: Decrease for faster rotation
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // =============== COLLISION HANDLING ===============
+        // Controls how bubbles react when hitting obstacles
+        
+        if (this.obstaclesLayer && airPocket.active && airPocket.body) {
+            // Remove any existing collider to prevent duplicates
+            if (airPocket.obstacleLayerCollider) {
+                this.physics.world.removeCollider(airPocket.obstacleLayerCollider);
+                delete airPocket.obstacleLayerCollider;
+            }
+            
+            // Create the obstacle collider with custom collision handling
+            airPocket.obstacleLayerCollider = this.physics.add.collider(
+                airPocket, 
+                this.obstaclesLayer,
+                (airPocket, obstacle) => {
+                    // This function runs when a bubble collides with an obstacle
+                    if (airPocket && airPocket.body) {
+                        // Generate a slightly stronger random deflection angle
+                        const deflectAngle = Phaser.Math.FloatBetween(-0.4, 0.4);  // Increased for more noticeable deflection
+                        
+                        // Calculate current speed
+                        const speed = Math.sqrt(
+                            Math.pow(airPocket.body.velocity.x, 2) + 
+                            Math.pow(airPocket.body.velocity.y, 2)
+                        );
+                        
+                        // Apply horizontal deflection force based on angle
+                        // Increased multiplier for more noticeable bounce effect
+                        airPocket.body.velocity.x += Math.cos(deflectAngle) * speed * 0.2;  // Increased from 0.1 for more bounce
+                        
+                        // Maintain or slightly reduce the upward velocity after collision
+                        // This prevents bubbles from accelerating when hitting obstacles
+                        const currentUpwardSpeed = Math.abs(airPocket.body.velocity.y);
+                        // Only set upward velocity if it's faster than current to prevent acceleration
+                        if (currentUpwardSpeed > airPocket.baseSpeed * 0.9) {
+                            // Slightly reduce current speed (90% of current) for a natural slowing effect on collision
+                            airPocket.body.velocity.y = -currentUpwardSpeed * 0.9;
+                        } else {
+                            // If already slower than base speed, use 90% of base speed
+                            airPocket.body.velocity.y = -airPocket.baseSpeed * 0.9;
+                        }
+                    }
+                }
+            );
+        }
+
+        return airPocket;
+    }
+
+    // Separated collision handler for better management
+    handleAirPocketTileCollision(pocket, tile) {
+        // No longer using custom collision processing
+        // This method has been deprecated
+        return;
+    }
+
+    // Add a helper method to check if a location is valid for spawning
+    isPositionValid(x, y) {
+        // If the obstacles layer doesn't exist, consider the position valid
+        if (!this.obstaclesLayer) return true;
+        
+        // Convert pixel coordinates to tile coordinates
+        const tileX = Math.floor(x / this.map.tileWidth);
+        const tileY = Math.floor(y / this.map.tileHeight);
+        
+        // Get the tile at this position
+        const tile = this.obstaclesLayer.getTileAt(tileX, tileY);
+        
+        // If there's no tile or the tile index is -1 (empty), the position is valid
+        if (!tile || tile.index === -1) return true;
+        
+        // If we have a tile with an index not equal to -1, it means there's a collision tile there
+        // so the position is not valid
+        return false;
+    }
+
+    // Helper method to check if a point is inside a polygon
+    isPointInPolygon(x, y, polygon) {
+        // No longer needed - using standard tile collision
+        // This method has been deprecated
+        return false;
+    }
+
+    // Add new method for movement burst
+    emitMovementBurst(direction) {
+        // Determine the emission position based on player's facing direction
+        // The player.flipX property tells us which way the sprite is facing
+        
+        // Calculate base offset - multiply by larger value to ensure it's clearly behind the diver
+        const offsetMultiplier = 50; // Increased for more distance behind diver
+        
+        // For X direction, we need to flip the logic - if flipX is true (facing left), emit from left
+        // If flipX is false (facing right), emit from right
+        let offsetX;
+        if (direction.x !== 0) {
+            // Correctly use player.flipX (true when facing left, emit from left side)
+            // Add 8px left offset (-8) regardless of direction
+            offsetX = this.player.flipX ? -offsetMultiplier - 8 : offsetMultiplier - 8;
+        } else {
+            // If moving vertically, use player.flipX to determine side
+            // Add 8px left offset (-8) regardless of direction
+            offsetX = this.player.flipX ? -offsetMultiplier - 8 : offsetMultiplier - 8;
+        }
+        
+        // For Y direction, emit from behind based on movement
+        // Add 10px upward offset (-10) regardless of direction
+        const offsetY = direction.y * (offsetMultiplier * 0.5) - 10;
+        
+        // Adjust offset when moving diagonally to maintain proper distance
+        if (direction.x !== 0 && direction.y !== 0) {
+            // Normalize diagonal offset
+            const norm = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
+            if (norm > 0) {
+                const scale = 60 / norm; // Increased for further distance
+                this.movementBurstEmitter.followOffset.x = offsetX * scale;
+                this.movementBurstEmitter.followOffset.y = offsetY * scale;
+            }
+        } else {
+            this.movementBurstEmitter.followOffset.x = offsetX;
+            this.movementBurstEmitter.followOffset.y = offsetY;
+        }
+        
+        // Apply final fine-tuning adjustments to emitter position
+        this.movementBurstEmitter.followOffset.y -= 10; // Move up 10px
+        
+        // Check if emitZone exists before trying to access its source property
+        if (this.movementBurstEmitter.emitZone && this.movementBurstEmitter.emitZone.source) {
+            // Adjust emitZone for more focused burst
+            this.movementBurstEmitter.emitZone.source.x = this.movementBurstEmitter.followOffset.x * 0.3;
+            this.movementBurstEmitter.emitZone.source.y = this.movementBurstEmitter.followOffset.y * 0.3;
+            // Reduce emitZone radius
+            this.movementBurstEmitter.emitZone.source.radius = 20; // Smaller radius for tighter emission pattern
+        }
+        
+        // Create burst effect at the calculated position with fewer bubbles
+        this.movementBurstEmitter.explode(7, // Reduced from 10 to 7 bubbles
+            this.player.x + this.movementBurstEmitter.followOffset.x, 
+            this.player.y + this.movementBurstEmitter.followOffset.y);
+    }
+
+    // Add a method to find the player spawn point from the map
+    findPlayerSpawn() {
+        console.log('Searching for player spawn in map objects...');
+        
+        // Check if map and object layers exist
+        if (!this.map || !this.map.objects) {
+            console.error('No map or object layers found. Cannot find player spawn point.');
+            return { x: 292, y: 340 }; // Hardcoded coordinate from level1.json as absolute fallback
+        }
+        
+        // Find the specific object with template="Player Spawn.tx"
+        let playerSpawnPoint = null;
+        
+        this.map.objects.forEach(layer => {
+            const objects = layer.objects || [];
+            objects.forEach(obj => {
+                // Log all objects to verify what we're looking at
+                console.log(`Object ID: ${obj.id}, Template: ${obj.template || 'None'}, x: ${obj.x}, y: ${obj.y}`);
+                
+                // Check specifically for the Player Spawn template
+                if (obj.template && (
+                    obj.template.includes('Player Spawn') || 
+                    obj.template.includes('player_spawn')
+                )) {
+                    console.log(`Found player spawn point at (${obj.x}, ${obj.y}) with template: ${obj.template}`);
+                    playerSpawnPoint = { x: obj.x, y: obj.y };
+                }
+            });
+        });
+        
+        if (playerSpawnPoint) {
+            console.log(`Using player spawn point from map: (${playerSpawnPoint.x}, ${playerSpawnPoint.y})`);
+            return playerSpawnPoint;
+        }
+        
+        // If we reach here, we couldn't find the spawn point in the map
+        console.error('Could not find Player Spawn object in map. Using hardcoded position from level1.json');
+        return { x: 292, y: 340 }; // Hardcoded fallback from level1.json
+    }
+
+    // Add a dedicated method for respawning the player
+    respawnPlayer() {
+        // Make sure we have a valid spawn point
+        if (!this.playerSpawnPoint) {
+            console.error('No player spawn point defined');
+            return;
+        }
+        
+        // Reset player position to spawn point location from map
+        this.player.x = this.playerSpawnPoint.x;
+        this.player.y = this.playerSpawnPoint.y;
+        
+        // Reactivate the player
+        this.player.setActive(true);
+        this.player.setVisible(true);
+        
+        // Re-enable physics if they were removed
+        if (!this.player.body) {
+            this.physics.add.existing(this.player);
+        }
+        
+        // IMPORTANT: Set correct physics properties to match what works for air pockets
+        this.player.body.setImmovable(true);
+        this.player.body.pushable = false;
+        this.player.body.setBounce(0.1);
+        
+        // Reset collision with obstacle layer if needed
+        if (this.obstaclesLayer) {
+            // Remove any existing colliders to prevent duplicate collision handling
+            this.physics.world.colliders.getActive().forEach(collider => {
+                if ((collider.object1 === this.player && collider.object2 === this.obstaclesLayer) || 
+                    (collider.object1 === this.obstaclesLayer && collider.object2 === this.player)) {
+                    this.physics.world.removeCollider(collider);
+                    console.log('Removed old player-obstacle collider during respawn');
+                }
+            });
+            
+            // CRITICAL: Use EXACTLY the same collider approach as air pockets
+            this.physics.add.collider(
+                this.player, 
+                this.obstaclesLayer
+            );
+            console.log('Added fresh player-obstacle collision during respawn using air pocket approach');
+        }
+        
+        // Reset oxygen level
+        this.currentOxygen = this.maxOxygen;
+        
+        // Reset velocity and acceleration
+        this.player.setVelocity(0, 0);
+        this.player.setAcceleration(0, 0);
+        
+        console.log(`Player respawned at exact spawn point from map: ${this.playerSpawnPoint.x}, ${this.playerSpawnPoint.y}`);
+    }
+
+    // This method updates the air pockets based on the respawn timer
+    updateAirPocketSpawns(time, delta) {
+        if (!this.respawningAirPockets || !this.obstaclesLayer) return;
+        
+        // Check each respawning air pocket
+        for (let i = this.respawningAirPockets.length - 1; i >= 0; i--) {
+            const airPocketData = this.respawningAirPockets[i];
+            
+            // Decrease time left
+            airPocketData.timeLeft -= delta;
+            
+            // Time to check if we can respawn
+            if (airPocketData.timeLeft <= 0) {
+                // Get the spawn point
+                const spawnPoint = airPocketData.spawnPoint;
+                
+                // Check if the position is valid (not inside an obstacle)
+                if (this.isPositionValid(spawnPoint.x, spawnPoint.y)) {
+                    // Time to respawn this air pocket
+                    const airPocket = this.createSingleAirPocket(spawnPoint.x, spawnPoint.y);
+                    
+                    // Remove from respawning list
+                    this.respawningAirPockets.splice(i, 1);
+                } else {
+                    // Location still blocked, try again later
+                    airPocketData.timeLeft = 1000; // Try again in 1 second
+                }
+            }
+        }
+    }
+
+    // Custom collision processor for player and tile collisions
+    processPlayerTileCollision(player, tile) {
+        // No longer using custom collision processing
+        // This method has been deprecated
+        return true;
+    }
+
+    // Custom process callback for air pocket and tile collisions
+    processAirPocketTileCollision(airPocket, tile) {
+        if (!tile || tile.index === -1) return false; // No collision with empty tiles
+        
+        // Get air pocket bounds (use a smaller collision area as we do elsewhere)
+        const pocketBounds = {
+            left: airPocket.x - (airPocket.width * airPocket.scale * 0.3),
+            right: airPocket.x + (airPocket.width * airPocket.scale * 0.3),
+            top: airPocket.y - (airPocket.height * airPocket.scale * 0.3),
+            bottom: airPocket.y + (airPocket.height * airPocket.scale * 0.3),
+            width: airPocket.width * airPocket.scale * 0.6,
+            height: airPocket.height * airPocket.scale * 0.6
+        };
+        
+        // Calculate tile world position
+        const tileWorldX = tile.x * tile.width;
+        const tileWorldY = tile.y * tile.height;
+        
+        // Use the collision data from the tileset if available
+        const gid = tile.index;
+        
+        // Find the tileset containing this tile
+        let tilesetData = null;
+        for (const tileset of this.map.tilesets) {
+            if (gid >= tileset.firstgid && gid < tileset.firstgid + tileset.total) {
+                tilesetData = tileset;
+                break;
+            }
+        }
+        
+        // Check if this tile has custom collision objects from Tiled
+        if (tilesetData && tilesetData.tiles) {
+            // Find the tile data in the tileset
+            const tileData = tilesetData.tiles.find(t => t.id === gid - tilesetData.firstgid);
+            
+            if (tileData && tileData.objectgroup && tileData.objectgroup.objects && tileData.objectgroup.objects.length > 0) {
+                // Use the first collision object
+                const collisionObj = tileData.objectgroup.objects[0];
+                
+                // Handle collision based on shape type
+                if (collisionObj.polygon) {
+                    // For polygon collision shapes
+                    const polygonPoints = collisionObj.polygon.map(p => ({
+                        x: tileWorldX + collisionObj.x + p.x,
+                        y: tileWorldY + collisionObj.y + p.y
+                    }));
+                    
+                    // Check corners of the air pocket against the polygon
+                    const corners = [
+                        { x: pocketBounds.left, y: pocketBounds.top },
+                        { x: pocketBounds.right, y: pocketBounds.top },
+                        { x: pocketBounds.left, y: pocketBounds.bottom },
+                        { x: pocketBounds.right, y: pocketBounds.bottom }
+                    ];
+                    
+                    // If any corner is inside the polygon, there's a collision
+                    for (const corner of corners) {
+                        if (this.isPointInPolygon(corner.x, corner.y, polygonPoints)) {
+                            return true; // Collision detected
+                        }
+                    }
+                    
+                    // Also check if any polygon edge intersects with the air pocket bounds
+                    for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
+                        const p1 = polygonPoints[i];
+                        const p2 = polygonPoints[j];
+                        
+                        // Check if line intersects with any of the 4 sides of the air pocket bounds
+                        if (this.lineIntersectsRect(p1, p2, pocketBounds)) {
+                            return true; // Collision detected
+                        }
+                    }
+                    
+                    // No collision with polygon
+                    return false;
+                } else {
+                    // For rectangular collision shapes
+                    const shapeLeft = tileWorldX + collisionObj.x;
+                    const shapeRight = shapeLeft + collisionObj.width;
+                    const shapeTop = tileWorldY + collisionObj.y;
+                    const shapeBottom = shapeTop + collisionObj.height;
+                    
+                    // Check for intersection between air pocket bounds and shape bounds
+                    return !(
+                        pocketBounds.right < shapeLeft || 
+                        pocketBounds.left > shapeRight ||
+                        pocketBounds.bottom < shapeTop ||
+                        pocketBounds.top > shapeBottom
+                    );
+                }
+            }
+        }
+        
+        // If no custom collision shape, use default tile collision
+        return true;
+    }
+
+    // Create custom collision objects from Tiled object layers
+    createCustomCollisionObjects() {
+        // No longer using custom collision objects
+        // This method has been deprecated
+        return;
+    }
+    
+    // Process custom collision for polygon shapes
+    processCustomCollision(sprite1, sprite2) {
+        // No longer using custom collision processing
+        // This method has been deprecated
+        return true;
+    }
+    
+    // Handle custom collision for players and custom collision objects
+    handleCustomCollision(player, collisionObj) {
+        // No longer using custom collision processing
+        // This method has been deprecated
+        return;
+    }
+    
+    // Handle custom collision for air pockets and custom collision objects
+    handleAirPocketCustomCollision(airPocket, collisionObj) {
+        // No longer using custom collision processing
+        // This method has been deprecated
+        return;
+    }
+
+    // SIMPLIFIED COLLISION FIX METHOD
+    fixTiledCollisions() {
+        if (!this.obstaclesLayer) {
+            console.error('No obstacles layer exists to fix collisions!');
+            return;
+        }
+        
+        console.log('==== FIXING COLLISION DATA FROM TILED ====');
+        
+        // Reset all collision data on the layer
+        this.obstaclesLayer.setCollision(false);
+        
+        // Set collision only for non-empty tiles
+        this.obstaclesLayer.setCollisionByExclusion([-1]);
+        
+        console.log('Reset collision data: all non-empty tiles (-1) are now collidable');
+        
+        // Recreate the player-obstacle collider using EXACT same pattern as air pockets
+        if (this.player && this.player.body) {
+            // Remove existing collider if any
+            if (this.playerObstacleCollider) {
+                this.physics.world.removeCollider(this.playerObstacleCollider);
+            }
+            
+            // CRITICAL FIX: Check player physics body
+            console.log('Player body before collider creation:', {
+                width: this.player.body.width,
+                height: this.player.body.height,
+                offsetX: this.player.body.offset.x,
+                offsetY: this.player.body.offset.y,
+                enabled: this.player.body.enable
+            });
+            
+            // Ensure physics body is enabled and properly sized
+            if (!this.player.body.enable) {
+                console.log('Re-enabling player physics body');
+                this.player.body.enable = true;
+            }
+            
+            // CRITICAL FIX: Reinitialize the physics body to ensure it's correctly sized
+            // Use the same size/offset we set originally
+            this.player.body.setSize(80, 120, true);
+            this.player.body.setOffset(5, 5);
+            
+            // Fix contradicting physics properties - match what works for air pockets
+            this.player.body.setImmovable(true);
+            this.player.body.pushable = false;
+            this.player.body.setBounce(0.1);
+            
+            // CRITICAL: Use EXACT same collider approach as air pockets - no callbacks or filters
+            this.playerObstacleCollider = this.physics.add.collider(
+                this.player,
+                this.obstaclesLayer
+            );
+            
+            console.log('Created player-obstacle collider using EXACT same approach as air pockets');
+        }
+        
+        // Update debug visualization if enabled
+        if (this.physics.config.debug && this.tileDebugGraphics) {
+            this.tileDebugGraphics.clear();
+            
+            this.obstaclesLayer.renderDebug(this.tileDebugGraphics, {
+                tileColor: null,
+                collidingTileColor: new Phaser.Display.Color(255, 0, 255, 1),
+                faceColor: new Phaser.Display.Color(255, 255, 0, 1)
+            });
+            
+            console.log('Updated collision debug visualization');
+        }
+    }
+
+    // Add a method to respawn all air pockets for debugging
+    respawnAllAirPockets() {
+        console.log('Removing all existing air pockets...');
+        // First, ensure we completely remove all existing air pockets
+        if (this.airPockets) {
+            // Get a count before removal for logging
+            const airPocketCount = this.airPockets.getChildren().length;
+            
+            // Clear the entire group to ensure all air pockets are removed
+            this.airPockets.clear(true, true);
+            console.log(`Removed ${airPocketCount} air pockets from the map`);
+        }
+        
+        // Mark all spawn points as inactive
+        this.airPocketSpawnPoints.forEach(spawnPoint => {
+            spawnPoint.active = false;
+        });
+        
+        // Now create new air pockets at all spawn points
+        this.airPocketSpawnPoints.forEach((spawnPoint, index) => {
+            // Check if this position is valid (not inside an obstacle)
+            if (this.isPositionValid(spawnPoint.x, spawnPoint.y)) {
+                // Spawn a new air pocket
+                const airPocket = this.createSingleAirPocket(spawnPoint.x, spawnPoint.y, spawnPoint.variation);
+                
+                // Store the spawn point index for reference
+                airPocket.spawnPointIndex = index;
+                
+                // Mark as active
+                spawnPoint.active = true;
+                spawnPoint.lastSpawnTime = this.time.now;
+            }
+        });
+        
+        // No blue flash effect
     }
 }
 
@@ -554,10 +1959,33 @@ const config = {
         default: 'arcade',
         arcade: {
             gravity: { y: 0 },
-            debug: true
+            debug: true,     // Enable physics debugging to see custom collision shapes
+            debugShowBody: true,
+            debugShowStaticBody: true,
+            debugShowVelocity: true,
+            debugVelocityColor: 0xffff00,
+            debugBodyColor: 0x0000ff,
+            debugStaticBodyColor: 0xff00ff,
+            processTileCollisions: true,  // Make sure tile collisions are processed
+            tileBias: 64,     // Increase tile bias to prevent tunneling
+            fps: 60,          // Lock physics to 60fps for consistency
+            checkCollision: {
+                up: true,
+                down: true,
+                left: true,
+                right: true
+            },
+            overlapBias: 8,   // Add overlap bias for better overlap detection
+            maxEntries: 256   // Increase max entries in the dynamic tree
         }
     },
-    scene: GameScene
+    scene: GameScene,
+    callbacks: {
+        postBoot: function(game) {
+            // Safeguard for physics system
+            console.log('Game booted successfully, physics system initialized');
+        }
+    }
 };
 
 const game = new Phaser.Game(config); 
