@@ -1959,7 +1959,7 @@ const config = {
         default: 'arcade',
         arcade: {
             gravity: { y: 0 },
-            debug: true,     // Enable physics debugging to see custom collision shapes
+            debug: false,     // Disabled debug mode for production
             debugShowBody: true,
             debugShowStaticBody: true,
             debugShowVelocity: true,
