@@ -4,7 +4,8 @@
   "description": "An underwater exploration game built with Phaser 3",
   "scripts": {
     "start": "parcel src/index.html",
-    "build": "parcel build src/index.html --public-url ./",
+    "clean": "rimraf .parcel-cache dist",
+    "build": "npm run clean && parcel build src/index.html --public-url ./",
     "deploy": "npm run build && gh-pages -d dist"
   },
   "keywords": [
