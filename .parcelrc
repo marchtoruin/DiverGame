@@ -1,8 +1,7 @@
 {
   "extends": "@parcel/config-default",
   "transformers": {
-    "*.{png,jpg,jpeg,gif}": ["@parcel/transformer-raw"],
-    "*.{mp3,wav}": ["@parcel/transformer-raw"]
+    "*.{png,jpg,jpeg,gif,mp3,wav}": ["@parcel/transformer-raw"]
   },
   "resolvers": ["@parcel/resolver-default"],
   "packagers": {
