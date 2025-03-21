@@ -18,9 +18,17 @@
     "phaser": "^3.60.0"
   },
   "devDependencies": {
-    "parcel": "^2.8.3",
-    "gh-pages": "^5.0.0",
     "@parcel/config-default": "^2.8.3",
-    "@parcel/transformer-raw": "^2.8.3"
+    "@parcel/optimizer-cssnano": "^2.8.3",
+    "@parcel/optimizer-htmlnano": "^2.8.3",
+    "@parcel/optimizer-terser": "^2.8.3",
+    "@parcel/packager-css": "^2.8.3",
+    "@parcel/packager-html": "^2.8.3",
+    "@parcel/packager-js": "^2.8.3",
+    "@parcel/resolver-default": "^2.8.3",
+    "@parcel/transformer-raw": "^2.8.3",
+    "gh-pages": "^5.0.0",
+    "parcel": "^2.8.3",
+    "process": "^0.11.10"
   }
 }
