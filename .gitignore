@@ -1,1 +1,23 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.cache/
+.parcel-cache/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Cursor specific
+.cursor/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.log
