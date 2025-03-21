@@ -32,15 +32,15 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '18'
+          cache: 'npm'
 
       - name: Install dependencies
         run: |
-          npm install -g parcel-bundler
-          npm ci
+          rm -rf node_modules package-lock.json
+          npm install
 
       - name: Build
-        run: |
-          parcel build src/index.html --public-url ./ --no-optimize --no-cache
+        run: npm run build
 
       - name: Deploy
         id: deployment

@@ -4,7 +4,7 @@
   "description": "An underwater exploration game built with Phaser 3",
   "scripts": {
     "start": "parcel src/index.html",
-    "build": "parcel build src/index.html --public-url ./ --no-optimize",
+    "build": "parcel build src/index.html --public-url ./",
     "deploy": "npm run build && gh-pages -d dist"
   },
   "keywords": [
@@ -18,6 +18,18 @@
     "phaser": "^3.60.0"
   },
   "devDependencies": {
+    "@parcel/config-default": "2.9.3",
+    "@parcel/core": "2.9.3",
+    "@parcel/packager-css": "2.9.3",
+    "@parcel/packager-html": "2.9.3",
+    "@parcel/packager-js": "2.9.3",
+    "@parcel/reporter-cli": "2.9.3",
+    "@parcel/resolver-default": "2.9.3",
+    "@parcel/runtime-browser-hmr": "2.9.3",
+    "@parcel/runtime-js": "2.9.3",
+    "@parcel/transformer-css": "2.9.3",
+    "@parcel/transformer-html": "2.9.3",
+    "@parcel/transformer-js": "2.9.3",
     "@parcel/transformer-raw": "2.9.3",
     "parcel": "2.9.3",
     "gh-pages": "^5.0.0",
