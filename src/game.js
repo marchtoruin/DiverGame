@@ -12,9 +12,6 @@ import underwaterBg from './assets/underwater_bg.png';  // This is correct - in 
 import blackAndBlueImg from './assets/BlackNblues.png';  // Add this import
 import level1Data from './assets/maps/level1.json';  // Re-enable the import
 
-// Remove the direct import
-// import level1Data from './assets/maps/level1.json';
-
 class GameScene extends Phaser.Scene {
     constructor() {
         super({ 
@@ -24,12 +21,15 @@ class GameScene extends Phaser.Scene {
         // Configure physics separately in the init method
         this.isMuted = false;
         this.musicVolume = 0.5; // Default volume
+        this.boostActive = false; // Track if boost is active
+        this.boostCooldown = false; // Track if boost is on cooldown
+        this.boostCooldownTime = 0; // Time when cooldown ends
+        this.bubbleEffectsEnabled = false; // Start with bubble effects disabled
     }
     
     init() {
         // Configure physics system with proper settings
         this.physics.world.setBounds(0, 0, 1600, 1200); // Default until map loads
-        this.physics.world.on('worldbounds', this.handleWorldBounds, this);
         
         // Create collision groups to better manage collisions
         // Only enable debug body if debug graphics are available
@@ -40,11 +40,6 @@ class GameScene extends Phaser.Scene {
         console.log('Physics system initialized');
     }
     
-    handleWorldBounds(body) {
-        // We don't want entities to collide with world bounds, so this method is now empty
-        return false;
-    }
-
     preload() {
         // Add loading error handlers
         this.load.on('loaderror', (fileObj) => {
@@ -149,7 +144,7 @@ class GameScene extends Phaser.Scene {
         
         // Configure other physics properties for the player
         this.player.setDrag(100);
-        this.player.setMaxVelocity(300);  // Restoring original velocity
+        this.player.setMaxVelocity(300);  // Will be adjusted in update based on boost state
         this.player.setDepth(3); // Player should be above obstacle layer
 
         // Make the player's physics body more reliable for collisions
@@ -160,6 +155,11 @@ class GameScene extends Phaser.Scene {
         // This is likely why air pockets collide but player doesn't
         this.player.body.setImmovable(true);  // Set to true like air pockets
         this.player.body.pushable = false;   // Match air pocket settings
+
+        // Initialize boost state - ensure boost is OFF initially
+        this.boostActive = false;
+        this.boostCooldown = false;
+        this.boostCooldownTime = 0;
 
         // IMPORTANT: Set overflow check to prevent tunneling through objects
         // This ensures multiple checks per step for fast-moving objects
@@ -207,7 +207,7 @@ class GameScene extends Phaser.Scene {
         // Spawn air pockets from Tiled map only
         this.spawnTiledAirPockets();
         
-        // Create player bubble trail
+        // Create player bubble trail (disabled by default - will enable on first movement)
         this.bubbleEmitter = this.add.particles(0, 0, 'bubble', {
             follow: this.player,
             followOffset: { x: 10, y: -32 },
@@ -225,25 +225,32 @@ class GameScene extends Phaser.Scene {
                 source: new Phaser.Geom.Circle(10, -32, 5)
             }
         }).setDepth(3.5);
+        
+        // Disable emitter initially
+        this.bubbleEmitter.stop();
 
-        // Create a separate emitter for movement bursts
+        // Create a separate emitter for movement bursts (disabled by default)
         this.movementBurstEmitter = this.add.particles(0, 0, 'bubble', {
             follow: this.player,
             followOffset: { x: 0, y: 0 },
-            lifespan: 1500,
-            gravityY: -100,
-            speed: { min: 80, max: 120 },
-            scale: { start: 0.1, end: 0.02 },
-            alpha: { start: 0.8, end: 0 },
-            angle: { min: 180, max: 360 },
-            rotate: { min: -180, max: 180 },
-            frequency: 500,
-            quantity: 0,
+            lifespan: 1000, // Shorter lifespan for jet effect
+            gravityY: -20, // Less gravity for straighter path
+            speed: { min: 250, max: 400 }, // Much faster for jet blast effect
+            scale: { start: 0.2, end: 0.05 },
+            alpha: { start: 0.9, end: 0 },
+            angle: { min: 170, max: 190 }, // Will be adjusted based on player direction
+            rotate: { min: -15, max: 15 }, // Less rotation for more directional appearance
+            frequency: 20, // More frequent emission for denser jet effect
+            quantity: 3, // Emit more bubbles for density
+            tint: [ 0xffffff, 0xccccff ], // Add slight blue tint to some bubbles
             emitZone: { 
                 type: 'random',
-                source: new Phaser.Geom.Circle(0, 0, 20)
+                source: new Phaser.Geom.Circle(0, 0, 3) // Smaller emission zone for focused jet
             }
         }).setDepth(3.5);
+        
+        // Disable emitter initially
+        this.movementBurstEmitter.stop();
         
         // Player movement tracking
         this.playerMovement = {
@@ -311,13 +318,24 @@ class GameScene extends Phaser.Scene {
         respawnHint.setScrollFactor(0);
         respawnHint.setDepth(10);
 
+        // Add hint text for boost key
+        const boostHint = this.add.text(20, 170, 'SPACE: Boost (uses oxygen)', { 
+            font: '24px Arial', 
+            color: '#ffffff',
+            backgroundColor: '#000000',
+            padding: { x: 5, y: 5 }
+        });
+        boostHint.setScrollFactor(0);
+        boostHint.setDepth(10);
+
         // Set up controls
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keys = {
             up: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
             down: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
             left: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-            right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
+            right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+            boost: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
         };
 
         // Add key listener for X to fix collision
@@ -502,7 +520,10 @@ class GameScene extends Phaser.Scene {
         }
 
         // Update oxygen
-        this.currentOxygen -= (delta / 1000) * 1;
+        // Only deplete oxygen if not boosting, otherwise boost will handle oxygen depletion
+        if (!this.boostActive) {
+            this.currentOxygen -= (delta / 1000) * 1;
+        }
         this.currentOxygen = Phaser.Math.Clamp(this.currentOxygen, 0, this.maxOxygen);
         
         // Only proceed with game over if oxygen is actually 0
@@ -542,29 +563,146 @@ class GameScene extends Phaser.Scene {
 
         // Movement controls
         if (this.cursors.left.isDown || this.keys.left.isDown) {
-            this.player.setAccelerationX(-300);
+            this.player.setAccelerationX(-200); // Reduced from 300 for slower base movement
             this.player.setFlipX(true);
             currentDirection.x = -1;
+            
+            // Enable particle effects on first movement
+            if (!this.bubbleEffectsEnabled) {
+                this.bubbleEffectsEnabled = true;
+                this.bubbleEmitter.start();
+            }
         } else if (this.cursors.right.isDown || this.keys.right.isDown) {
-            this.player.setAccelerationX(300);
+            this.player.setAccelerationX(200); // Reduced from 300 for slower base movement
             this.player.setFlipX(false);
             currentDirection.x = 1;
+            
+            // Enable particle effects on first movement
+            if (!this.bubbleEffectsEnabled) {
+                this.bubbleEffectsEnabled = true;
+                this.bubbleEmitter.start();
+            }
         } else {
             this.player.setAccelerationX(0);
         }
 
         if (this.cursors.up.isDown || this.keys.up.isDown) {
-            this.player.setAccelerationY(-300);
+            this.player.setAccelerationY(-200); // Reduced from 300 for slower base movement
             currentDirection.y = -1;
+            
+            // Enable particle effects on first movement
+            if (!this.bubbleEffectsEnabled) {
+                this.bubbleEffectsEnabled = true;
+                this.bubbleEmitter.start();
+            }
         } else if (this.cursors.down.isDown || this.keys.down.isDown) {
-            this.player.setAccelerationY(300);
+            this.player.setAccelerationY(200); // Reduced from 300 for slower base movement
             currentDirection.y = 1;
+            
+            // Enable particle effects on first movement
+            if (!this.bubbleEffectsEnabled) {
+                this.bubbleEffectsEnabled = true;
+                this.bubbleEmitter.start();
+            }
         } else {
             this.player.setAccelerationY(0);
         }
         
+        // Check if boost is on cooldown
+        if (this.boostCooldown && time > this.boostCooldownTime) {
+            this.boostCooldown = false;
+        }
+        
+        // Handle boost key (press and hold spacebar)
+        if (this.keys.boost.isDown && this.currentOxygen > 0 && !this.boostCooldown) {
+            // Only show boost just-activated log if it wasn't already active
+            if (!this.boostActive) {
+                console.log('Boost activated');
+                this.boostActive = true;
+                
+                // Change oxygen bar color during boost
+                if (this.oxygenBar) {
+                    this.oxygenBar.fillColor = 0x00ffff; // Cyan color during boost
+                }
+            }
+            
+            // Consume oxygen while boosting (faster than normal depletion)
+            this.currentOxygen -= (delta / 1000) * 5; // 5x normal depletion rate
+            
+            // Calculate boost direction based on current movement or facing direction
+            let boostDirection = { x: 0, y: 0 };
+            
+            // If actively moving, boost in that direction
+            if (currentDirection.x !== 0 || currentDirection.y !== 0) {
+                boostDirection = currentDirection;
+            } else {
+                // If not moving, boost based on facing direction
+                boostDirection.x = this.player.flipX ? -1 : 1;
+            }
+            
+            // Calculate the vector magnitude of current velocity
+            const currentVelocityMagnitude = Math.sqrt(
+                Math.pow(this.player.body.velocity.x, 2) + 
+                Math.pow(this.player.body.velocity.y, 2)
+            );
+            
+            // Apply direct velocity increase for immediate speed boost effect
+            let boostSpeed = 600; // Default boost speed
+            
+            // If player is already moving at high speed, use super boost
+            if (currentVelocityMagnitude > 200) {
+                boostSpeed = 1000; // Much higher boost when already at high speed
+                
+                // Add a very gentle camera shake effect
+                this.cameras.main.shake(80, 0.002);
+            }
+            
+            // Apply the appropriate boost speed based on direction
+            if (boostDirection.x !== 0) {
+                this.player.body.velocity.x = boostDirection.x * boostSpeed;
+            }
+            if (boostDirection.y !== 0) {
+                this.player.body.velocity.y = boostDirection.y * boostSpeed;
+            }
+            
+            // If not moving in any direction, apply boost based on facing direction
+            if (boostDirection.x === 0 && boostDirection.y === 0) {
+                const facingDirection = this.player.flipX ? -1 : 1;
+                this.player.body.velocity.x = facingDirection * boostSpeed;
+            }
+            
+            // Create constant jet blast effect while boosting
+            if (time - this.playerMovement.lastBurstTime > 50) {
+                this.emitBoostBurst(boostDirection);
+                this.playerMovement.lastBurstTime = time;
+            }
+        } else {
+            // If boost was active but is now off (released space or ran out of oxygen)
+            if (this.boostActive) {
+                console.log('Boost deactivated');
+                this.boostActive = false;
+                
+                // Set cooldown after boost ends
+                this.boostCooldown = true;
+                this.boostCooldownTime = time + 500; // 0.5 second cooldown
+                
+                // Reset oxygen bar color
+                if (this.oxygenBar) {
+                    this.oxygenBar.fillColor = 0x00ff00; // Change back to green
+                }
+            }
+        }
+        
+        // Handle boost cooldown expiration
+        if (this.boostCooldown && time > this.boostCooldownTime) {
+            this.boostCooldown = false;
+        }
+        
         // IMPORTANT: Apply velocity clamping to prevent fast tunneling through obstacles
-        const maxSpeed = 300; // Restored to original speed
+        // Higher max speed when boosting, with possibility of extra momentum boost
+        const maxSpeed = this.boostActive ? 
+            (this.player.body.speed > 200 ? 1000 : 600) : // Allow much higher max speed when boosting from high speed
+            250; // Normal non-boost speed
         const vx = Phaser.Math.Clamp(this.player.body.velocity.x, -maxSpeed, maxSpeed);
         const vy = Phaser.Math.Clamp(this.player.body.velocity.y, -maxSpeed, maxSpeed);
         this.player.setVelocity(vx, vy);
@@ -576,8 +714,17 @@ class GameScene extends Phaser.Scene {
             currentDirection.y !== this.playerMovement.prevDirection.y;
         
         // Start moving or change direction burst effect
+        // Only emit movement bursts when player is actually moving and not boosting
         if ((isMovingNow && (!this.playerMovement.isMoving || directionChanged)) && 
-            (time - this.playerMovement.lastBurstTime > 500)) { // Limit bursts to every 500ms
+            (time - this.playerMovement.lastBurstTime > 500) && 
+            !this.boostActive) { // Only emit normal movement burst when not boosting
+            
+            // Enable particle system if this is first movement
+            if (!this.bubbleEffectsEnabled) {
+                this.bubbleEffectsEnabled = true;
+                this.bubbleEmitter.start();
+                this.movementBurstEmitter.start();
+            }
             
             // Emit a burst of bubbles
             this.emitMovementBurst(currentDirection);
@@ -593,7 +740,7 @@ class GameScene extends Phaser.Scene {
 
         // Check for and remove out-of-bounds air pockets with safety checks
         if (this.airPockets) {
-        this.airPockets.getChildren().forEach(airPocket => {
+            this.airPockets.getChildren().forEach(airPocket => {
                 // Skip processing if the air pocket is no longer valid
                 if (!airPocket || !airPocket.active || !airPocket.body) return;
                 
@@ -622,15 +769,8 @@ class GameScene extends Phaser.Scene {
                     }
                     airPocket.destroy();
                 }
-                    });
-                }
-            }
-
-    // Method to update debug graphics
-    updateDebugGraphics() {
-        // No longer using custom collision objects
-        // This method has been deprecated
-        return;
+            });
+        }
     }
 
     refillOxygen(player, airPocket) {
@@ -710,15 +850,15 @@ class GameScene extends Phaser.Scene {
     setupMusicSystem() {
         try {
             // Create audio instances if loaded successfully
-            if (this.cache.audio.exists('bgMusic') && this.cache.audio.exists('ambienceMusic')) {
+            if (this.cache.audio.exists('music') && this.cache.audio.exists('ambience')) {
                 // Create the background music instance
-                this.backgroundMusic = this.sound.add('bgMusic', {
+                this.backgroundMusic = this.sound.add('music', {
                     volume: this.musicVolume * 0.7, // Slightly lower volume for background music
                     loop: true
                 });
 
                 // Create the ambient underwater sounds instance
-                this.ambienceSound = this.sound.add('ambienceMusic', {
+                this.ambienceSound = this.sound.add('ambience', {
                     volume: 1, // Lower volume for ambient sounds
                     loop: true
                 });
@@ -1476,30 +1616,18 @@ class GameScene extends Phaser.Scene {
                         // Increased multiplier for more noticeable bounce effect
                         airPocket.body.velocity.x += Math.cos(deflectAngle) * speed * 0.2;  // Increased from 0.1 for more bounce
                         
-                        // Maintain or slightly reduce the upward velocity after collision
-                        // This prevents bubbles from accelerating when hitting obstacles
+                        // Maintain upward velocity after collision (don't accelerate upward)
+                        // FIXED: Don't increase the upward velocity when colliding with obstacles
                         const currentUpwardSpeed = Math.abs(airPocket.body.velocity.y);
-                        // Only set upward velocity if it's faster than current to prevent acceleration
-                        if (currentUpwardSpeed > airPocket.baseSpeed * 0.9) {
-                            // Slightly reduce current speed (90% of current) for a natural slowing effect on collision
-                            airPocket.body.velocity.y = -currentUpwardSpeed * 0.9;
-                        } else {
-                            // If already slower than base speed, use 90% of base speed
-                            airPocket.body.velocity.y = -airPocket.baseSpeed * 0.9;
-                        }
+                        
+                        // Always maintain the same speed or slightly reduce it, never increase
+                        airPocket.body.velocity.y = -Math.min(currentUpwardSpeed, airPocket.baseSpeed);
                     }
                 }
             );
         }
 
         return airPocket;
-    }
-
-    // Separated collision handler for better management
-    handleAirPocketTileCollision(pocket, tile) {
-        // No longer using custom collision processing
-        // This method has been deprecated
-        return;
     }
 
     // Add a helper method to check if a location is valid for spawning
@@ -1522,68 +1650,30 @@ class GameScene extends Phaser.Scene {
         return false;
     }
 
-    // Helper method to check if a point is inside a polygon
-    isPointInPolygon(x, y, polygon) {
-        // No longer needed - using standard tile collision
-        // This method has been deprecated
-        return false;
-    }
-
     // Add new method for movement burst
     emitMovementBurst(direction) {
         // Determine the emission position based on player's facing direction
-        // The player.flipX property tells us which way the sprite is facing
         
-        // Calculate base offset - multiply by larger value to ensure it's clearly behind the diver
-        const offsetMultiplier = 50; // Increased for more distance behind diver
+        // Fixed position offset from the player's back (where a tank/jet pack would be)
+        const offsetX = this.player.flipX ? -40 : 40; // Position from the back of the diver
+        const offsetY = 5; // Slightly below center for backpack position
         
-        // For X direction, we need to flip the logic - if flipX is true (facing left), emit from left
-        // If flipX is false (facing right), emit from right
-        let offsetX;
-        if (direction.x !== 0) {
-            // Correctly use player.flipX (true when facing left, emit from left side)
-            // Add 8px left offset (-8) regardless of direction
-            offsetX = this.player.flipX ? -offsetMultiplier - 8 : offsetMultiplier - 8;
-        } else {
-            // If moving vertically, use player.flipX to determine side
-            // Add 8px left offset (-8) regardless of direction
-            offsetX = this.player.flipX ? -offsetMultiplier - 8 : offsetMultiplier - 8;
-        }
+        // Set emitter follow offset
+        this.movementBurstEmitter.followOffset.x = offsetX;
+        this.movementBurstEmitter.followOffset.y = offsetY;
         
-        // For Y direction, emit from behind based on movement
-        // Add 10px upward offset (-10) regardless of direction
-        const offsetY = direction.y * (offsetMultiplier * 0.5) - 10;
+        // Set the emission angle based on player's facing direction
+        // This creates the "jet blast" effect - always emit in the opposite direction of facing
+        const angleMin = this.player.flipX ? 340 : 160; // Right-facing: emit left, Left-facing: emit right
+        const angleMax = this.player.flipX ? 380 : 200; // Small angle range for focused stream
         
-        // Adjust offset when moving diagonally to maintain proper distance
-        if (direction.x !== 0 && direction.y !== 0) {
-            // Normalize diagonal offset
-            const norm = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
-            if (norm > 0) {
-                const scale = 60 / norm; // Increased for further distance
-                this.movementBurstEmitter.followOffset.x = offsetX * scale;
-                this.movementBurstEmitter.followOffset.y = offsetY * scale;
-            }
-        } else {
-            this.movementBurstEmitter.followOffset.x = offsetX;
-            this.movementBurstEmitter.followOffset.y = offsetY;
-        }
+        // For Phaser 3 particle emitters, we can't directly set these properties
+        // Instead, we need to create new particle effects with the updated config
         
-        // Apply final fine-tuning adjustments to emitter position
-        this.movementBurstEmitter.followOffset.y -= 10; // Move up 10px
-        
-        // Check if emitZone exists before trying to access its source property
-        if (this.movementBurstEmitter.emitZone && this.movementBurstEmitter.emitZone.source) {
-            // Adjust emitZone for more focused burst
-            this.movementBurstEmitter.emitZone.source.x = this.movementBurstEmitter.followOffset.x * 0.3;
-            this.movementBurstEmitter.emitZone.source.y = this.movementBurstEmitter.followOffset.y * 0.3;
-            // Reduce emitZone radius
-            this.movementBurstEmitter.emitZone.source.radius = 20; // Smaller radius for tighter emission pattern
-        }
-        
-        // Create burst effect at the calculated position with fewer bubbles
-        this.movementBurstEmitter.explode(7, // Reduced from 10 to 7 bubbles
-            this.player.x + this.movementBurstEmitter.followOffset.x, 
-            this.player.y + this.movementBurstEmitter.followOffset.y);
+        // Create powerful jet blast effect with more bubbles for a dense stream
+        this.movementBurstEmitter.explode(15, // More bubbles for dense jet blast
+            this.player.x + offsetX, 
+            this.player.y + offsetY);
     }
 
     // Add a method to find the player spawn point from the map
@@ -1712,138 +1802,6 @@ class GameScene extends Phaser.Scene {
         }
     }
 
-    // Custom collision processor for player and tile collisions
-    processPlayerTileCollision(player, tile) {
-        // No longer using custom collision processing
-        // This method has been deprecated
-        return true;
-    }
-
-    // Custom process callback for air pocket and tile collisions
-    processAirPocketTileCollision(airPocket, tile) {
-        if (!tile || tile.index === -1) return false; // No collision with empty tiles
-        
-        // Get air pocket bounds (use a smaller collision area as we do elsewhere)
-        const pocketBounds = {
-            left: airPocket.x - (airPocket.width * airPocket.scale * 0.3),
-            right: airPocket.x + (airPocket.width * airPocket.scale * 0.3),
-            top: airPocket.y - (airPocket.height * airPocket.scale * 0.3),
-            bottom: airPocket.y + (airPocket.height * airPocket.scale * 0.3),
-            width: airPocket.width * airPocket.scale * 0.6,
-            height: airPocket.height * airPocket.scale * 0.6
-        };
-        
-        // Calculate tile world position
-        const tileWorldX = tile.x * tile.width;
-        const tileWorldY = tile.y * tile.height;
-        
-        // Use the collision data from the tileset if available
-        const gid = tile.index;
-        
-        // Find the tileset containing this tile
-        let tilesetData = null;
-        for (const tileset of this.map.tilesets) {
-            if (gid >= tileset.firstgid && gid < tileset.firstgid + tileset.total) {
-                tilesetData = tileset;
-                break;
-            }
-        }
-        
-        // Check if this tile has custom collision objects from Tiled
-        if (tilesetData && tilesetData.tiles) {
-            // Find the tile data in the tileset
-            const tileData = tilesetData.tiles.find(t => t.id === gid - tilesetData.firstgid);
-            
-            if (tileData && tileData.objectgroup && tileData.objectgroup.objects && tileData.objectgroup.objects.length > 0) {
-                // Use the first collision object
-                const collisionObj = tileData.objectgroup.objects[0];
-                
-                // Handle collision based on shape type
-                if (collisionObj.polygon) {
-                    // For polygon collision shapes
-                    const polygonPoints = collisionObj.polygon.map(p => ({
-                        x: tileWorldX + collisionObj.x + p.x,
-                        y: tileWorldY + collisionObj.y + p.y
-                    }));
-                    
-                    // Check corners of the air pocket against the polygon
-                    const corners = [
-                        { x: pocketBounds.left, y: pocketBounds.top },
-                        { x: pocketBounds.right, y: pocketBounds.top },
-                        { x: pocketBounds.left, y: pocketBounds.bottom },
-                        { x: pocketBounds.right, y: pocketBounds.bottom }
-                    ];
-                    
-                    // If any corner is inside the polygon, there's a collision
-                    for (const corner of corners) {
-                        if (this.isPointInPolygon(corner.x, corner.y, polygonPoints)) {
-                            return true; // Collision detected
-                        }
-                    }
-                    
-                    // Also check if any polygon edge intersects with the air pocket bounds
-                    for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
-                        const p1 = polygonPoints[i];
-                        const p2 = polygonPoints[j];
-                        
-                        // Check if line intersects with any of the 4 sides of the air pocket bounds
-                        if (this.lineIntersectsRect(p1, p2, pocketBounds)) {
-                            return true; // Collision detected
-                        }
-                    }
-                    
-                    // No collision with polygon
-                    return false;
-                } else {
-                    // For rectangular collision shapes
-                    const shapeLeft = tileWorldX + collisionObj.x;
-                    const shapeRight = shapeLeft + collisionObj.width;
-                    const shapeTop = tileWorldY + collisionObj.y;
-                    const shapeBottom = shapeTop + collisionObj.height;
-                    
-                    // Check for intersection between air pocket bounds and shape bounds
-                    return !(
-                        pocketBounds.right < shapeLeft || 
-                        pocketBounds.left > shapeRight ||
-                        pocketBounds.bottom < shapeTop ||
-                        pocketBounds.top > shapeBottom
-                    );
-                }
-            }
-        }
-        
-        // If no custom collision shape, use default tile collision
-        return true;
-    }
-
-    // Create custom collision objects from Tiled object layers
-    createCustomCollisionObjects() {
-        // No longer using custom collision objects
-        // This method has been deprecated
-        return;
-    }
-    
-    // Process custom collision for polygon shapes
-    processCustomCollision(sprite1, sprite2) {
-        // No longer using custom collision processing
-        // This method has been deprecated
-        return true;
-    }
-    
-    // Handle custom collision for players and custom collision objects
-    handleCustomCollision(player, collisionObj) {
-        // No longer using custom collision processing
-        // This method has been deprecated
-        return;
-    }
-    
-    // Handle custom collision for air pockets and custom collision objects
-    handleAirPocketCustomCollision(airPocket, collisionObj) {
-        // No longer using custom collision processing
-        // This method has been deprecated
-        return;
-    }
-
     // SIMPLIFIED COLLISION FIX METHOD
     fixTiledCollisions() {
         if (!this.obstaclesLayer) {
@@ -1951,6 +1909,56 @@ class GameScene extends Phaser.Scene {
         });
         
         // No blue flash effect
+    }
+
+    // Add a new method specifically for boost bursts, with more power
+    emitBoostBurst(direction) {
+        // Determine the emission position based on player's direction
+        let offsetX, offsetY, emitAngle;
+        
+        if (direction.x !== 0) {
+            // Horizontal movement - emit from behind
+            offsetX = direction.x > 0 ? -40 : 40; // Emit from opposite side of movement
+            offsetY = 0;
+            emitAngle = direction.x > 0 ? { min: 160, max: 200 } : { min: 340, max: 380 };
+        } else if (direction.y !== 0) {
+            // Vertical movement
+            offsetX = 0;
+            offsetY = direction.y > 0 ? -40 : 40; // Emit from opposite side of movement
+            emitAngle = direction.y > 0 ? { min: 250, max: 290 } : { min: 70, max: 110 };
+        } else {
+            // Default (no movement) - use player's facing direction
+            offsetX = this.player.flipX ? 40 : -40;
+            offsetY = 0;
+            emitAngle = this.player.flipX ? { min: 340, max: 380 } : { min: 160, max: 200 };
+        }
+        
+        // Create a temporary stronger emitter specifically for the boost
+        const boostEmitter = this.add.particles(0, 0, 'bubble', {
+            x: this.player.x + offsetX,
+            y: this.player.y + offsetY,
+            lifespan: 1000,
+            gravityY: -20,
+            speed: { min: 400, max: 600 }, // Increased from 300-500 for more dramatic jet effect
+            scale: { start: 0.4, end: 0.1 }, // Larger particles for more dramatic effect
+            alpha: { start: 1.0, end: 0 }, // Fully opaque start
+            angle: emitAngle,
+            rotate: { min: -15, max: 15 },
+            frequency: -1, // Emit all at once (explode mode)
+            emitZone: { 
+                type: 'random',
+                source: new Phaser.Geom.Circle(0, 0, 4) // Slightly larger radius for boost
+            },
+            tint: [ 0xffffff, 0xd8f0ff, 0xccccff ] // Add more blue tints for dramatic effect
+        }).setDepth(3.5);
+        
+        // Emit a dense burst of particles
+        boostEmitter.explode(35); // Increased from 25 for more particles
+        
+        // Destroy the temporary emitter after a short time
+        this.time.delayedCall(1000, () => {
+            boostEmitter.destroy();
+        });
     }
 }
 

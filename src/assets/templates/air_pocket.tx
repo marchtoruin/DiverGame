@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<template>
+ <object name="air_pocket" width="88.2831" height="62.5339">
+  <properties>
+   <property name="type" value="air_pocket"/>
+   <property name="variation" type="int" value="1"/>
+  </properties>
+ </object>
+</template>

@@ -1,11 +1,11 @@
 {
   "name": "underwater-game",
   "version": "1.0.0",
-  "description": "A 2D underwater exploration game using Phaser 3",
-  "main": "src/game.js",
+  "description": "An underwater exploration game built with Phaser 3",
   "scripts": {
     "start": "parcel src/index.html",
-    "build": "parcel build src/index.html"
+    "build": "parcel build src/index.html --public-url ./",
+    "deploy": "npm run build && gh-pages -d dist"
   },
   "keywords": [
     "game",
@@ -15,10 +15,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "parcel-bundler": "^1.12.5",
-    "phaser": "^3.70.0"
+    "phaser": "^3.60.0"
   },
   "devDependencies": {
-    "@parcel/transformer-raw": "^2.14.0"
+    "parcel": "^2.8.3",
+    "gh-pages": "^5.0.0"
   }
 }
