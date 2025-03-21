@@ -38,6 +38,8 @@ jobs:
 
       - name: Install dependencies
         run: |
+          npm install -g parcel
+          npm install @parcel/config-default @parcel/transformer-raw @parcel/resolver-default @parcel/packager-html @parcel/packager-js @parcel/packager-css @parcel/optimizer-terser @parcel/optimizer-cssnano @parcel/optimizer-htmlnano
           npm clean-install --force
 
       - name: Build
