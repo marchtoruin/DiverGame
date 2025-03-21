@@ -1,0 +1,5 @@
+[33mcommit 451166c2a2da090eafb228db0b683cc11d17985c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Justin McClure <justin.j.mcclure@hotmail.com>
+Date:   Thu Mar 20 16:33:32 2025 -0700
+
+    Improved air pocket physics: fixed respawn to clear existing bubbles, increased bounce and deflection for more noticeable interactions, removed blue flash effect
