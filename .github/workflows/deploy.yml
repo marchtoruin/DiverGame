@@ -36,11 +36,15 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Clean install dependencies
         run: |
-          npm install -g parcel
-          npm install @parcel/config-default @parcel/transformer-raw @parcel/resolver-default @parcel/packager-html @parcel/packager-js @parcel/packager-css @parcel/optimizer-terser @parcel/optimizer-cssnano @parcel/optimizer-htmlnano
-          npm clean-install --force
+          rm -rf node_modules package-lock.json
+          npm install
+
+      - name: Install Parcel dependencies
+        run: |
+          npm install -g parcel@2.14.1
+          npm install --save-dev @parcel/config-default@2.14.1 @parcel/core@2.14.1 @parcel/packager-css@2.14.1 @parcel/packager-html@2.14.1 @parcel/packager-js@2.14.1 @parcel/reporter-cli@2.14.1 @parcel/resolver-default@2.14.1 @parcel/runtime-browser-hmr@2.14.1 @parcel/runtime-js@2.14.1 @parcel/transformer-css@2.14.1 @parcel/transformer-html@2.14.1 @parcel/transformer-js@2.14.1 @parcel/transformer-raw@2.14.1 @parcel/optimizer-cssnano@2.14.1 @parcel/optimizer-terser@2.14.1 @parcel/optimizer-htmlnano@2.14.1
 
       - name: Build
         run: npm run build
