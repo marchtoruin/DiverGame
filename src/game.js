@@ -25,6 +25,11 @@ class GameScene extends Phaser.Scene {
         this.boostCooldown = false; // Track if boost is on cooldown
         this.boostCooldownTime = 0; // Time when cooldown ends
         this.bubbleEffectsEnabled = false; // Start with bubble effects disabled
+        this.touchData = {
+            startX: 0,
+            startY: 0,
+            isMoving: false
+        };
     }
     
     init() {
@@ -357,6 +362,129 @@ class GameScene extends Phaser.Scene {
             console.log('R key pressed - Respawning all air pockets');
             this.respawnAllAirPockets();
         });
+
+        // Add touch controls
+        this.setupTouchControls();
+    }
+
+    setupTouchControls() {
+        // Create a semi-transparent touch joystick background with purple color (0x800080)
+        // Increased size to 90 (from 70) and moved position up and right
+        this.touchArea = this.add.circle(150, this.cameras.main.height - 200, 90, 0x800080, 0.3);
+        this.touchArea.setScrollFactor(0);
+        this.touchArea.setDepth(100);
+        this.touchArea.setInteractive();
+
+        // Create boost button (also moved up to match joystick height)
+        this.boostButton = this.add.circle(this.cameras.main.width - 100, this.cameras.main.height - 150, 40, 0x00ff00, 0.5);
+        this.boostButton.setScrollFactor(0);
+        this.boostButton.setDepth(100);
+        this.boostButton.setAlpha(0.5);
+        this.boostButton.setInteractive();
+
+        // Add text to boost button (adjusted to match new button position)
+        this.boostText = this.add.text(this.boostButton.x, this.boostButton.y, 'BOOST', {
+            font: '16px Arial',
+            color: '#ffffff'
+        }).setOrigin(0.5);
+        this.boostText.setScrollFactor(0);
+        this.boostText.setDepth(100);
+
+        // Track touch states
+        this.touchData = {
+            isMoving: false,
+            startX: 0,
+            startY: 0,
+            isBoosting: false
+        };
+
+        // Handle touch start
+        this.input.on('pointerdown', (pointer) => {
+            if (this.touchArea.getBounds().contains(pointer.x, pointer.y)) {
+                this.touchData.isMoving = true;
+                this.touchData.startX = pointer.x;
+                this.touchData.startY = pointer.y;
+            }
+            // Check boost button separately to allow simultaneous movement and boost
+            if (this.boostButton.getBounds().contains(pointer.x, pointer.y)) {
+                this.touchData.isBoosting = true;
+                this.keys.boost.isDown = true;
+            }
+        });
+
+        // Handle touch move
+        this.input.on('pointermove', (pointer) => {
+            if (this.touchData.isMoving) {
+                const deltaX = pointer.x - this.touchData.startX;
+                const deltaY = pointer.y - this.touchData.startY;
+                
+                // Simulate WASD key presses based on touch movement
+                // Clear previous simulated keys
+                this.keys.left.isDown = false;
+                this.keys.right.isDown = false;
+                this.keys.up.isDown = false;
+                this.keys.down.isDown = false;
+
+                // Set appropriate keys based on movement direction
+                if (Math.abs(deltaX) > 10) { // Small threshold to prevent jitter
+                    if (deltaX < 0) {
+                        this.keys.left.isDown = true;
+                    } else {
+                        this.keys.right.isDown = true;
+                    }
+                }
+                
+                if (Math.abs(deltaY) > 10) {
+                    if (deltaY < 0) {
+                        this.keys.up.isDown = true;
+                    } else {
+                        this.keys.down.isDown = true;
+                    }
+                }
+
+                // Update player facing direction
+                if (deltaX < 0) {
+                    this.player.setFlipX(true);
+                } else if (deltaX > 0) {
+                    this.player.setFlipX(false);
+                }
+            }
+        });
+
+        // Handle touch end
+        this.input.on('pointerup', (pointer) => {
+            // Check if this pointer was the one that started moving
+            if (this.touchData.isMoving) {
+                // Clear all simulated movement key states
+                this.keys.left.isDown = false;
+                this.keys.right.isDown = false;
+                this.keys.up.isDown = false;
+                this.keys.down.isDown = false;
+                this.touchData.isMoving = false;
+            }
+            
+            // Check if this pointer was the one boosting
+            if (this.touchData.isBoosting && this.boostButton.getBounds().contains(pointer.x, pointer.y)) {
+                this.keys.boost.isDown = false;
+                this.touchData.isBoosting = false;
+            }
+        });
+
+        // Make controls responsive to screen size
+        this.scale.on('resize', this.resizeControls, this);
+        this.resizeControls();
+    }
+
+    resizeControls() {
+        const width = this.cameras.main.width;
+        const height = this.cameras.main.height;
+
+        // Update joystick position with new coordinates
+        this.touchArea.setPosition(150, height - 200);
+
+        // Update boost button position
+        this.boostButton.setPosition(width - 100, height - 150);
+        this.boostText.setPosition(width - 100, height - 150);
     }
 
     update(time, delta) {
@@ -770,6 +898,24 @@ class GameScene extends Phaser.Scene {
                     airPocket.destroy();
                 }
             });
+        }
+
+        // Handle boost for touch controls
+        if (this.boostActive && this.currentOxygen > 0 && !this.boostCooldown) {
+            // Consume oxygen while boosting
+            this.currentOxygen -= (delta / 1000) * 5;
+
+            // Calculate boost direction based on current movement
+            const currentVelocity = new Phaser.Math.Vector2(this.player.body.velocity);
+            if (currentVelocity.length() > 0) {
+                currentVelocity.normalize();
+                this.player.body.velocity.x = currentVelocity.x * 600;
+                this.player.body.velocity.y = currentVelocity.y * 600;
+            } else {
+                // If not moving, boost in facing direction
+                const facingDirection = this.player.flipX ? -1 : 1;
+                this.player.body.velocity.x = facingDirection * 600;
+            }
         }
     }
 
