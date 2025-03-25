@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<template>
+ <object name="air_pocket" type="objectlayer">
+  <properties>
+   <property name="oxygen" type="int" value="50"/>
+   <property name="respawn" type="int" value="30"/>
+   <property name="variation" type="int" value="1"/>
+  </properties>
+  <point/>
+ </object>
+</template>

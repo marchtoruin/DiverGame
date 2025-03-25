@@ -1,0 +1,779 @@
+import Phaser from 'phaser';
+import { PLAYER, ANIMATIONS, PHYSICS, OXYGEN, CAMERA } from '../utils/Constants';
+
+/**
+ * Player entity for the underwater game
+ */
+export default class Player extends Phaser.Events.EventEmitter {
+    /**
+     * Create the player entity
+     * @param {Phaser.Scene} scene - The scene this player belongs to
+     * @param {number} x - Initial x position
+     * @param {number} y - Initial y position
+     */
+    constructor(scene, x, y) {
+        super();
+        
+        this.scene = scene;
+        this.sprite = null;
+        this.boostActive = false;
+        this.boostCooldown = false;
+        this.boostCooldownTime = 0;
+        this.spawnPoint = { x, y };
+        this.maxOxygen = OXYGEN.MAX;
+        this.oxygen = this.maxOxygen;
+        this.health = PLAYER.HEALTH.MAX;
+        this.active = true;
+        this.transitioning = false;
+        this.isInAirPocket = false;
+        this.isDrowning = false;
+        this.lastPosition = { x, y };
+        this.speed = PLAYER.MAX_VELOCITY;
+        this._inputState = null;
+        this._lastBoostParticleTime = null;
+        this.oxygenDepleted = false;
+        this.isLowOxygen = false;
+        
+        // New properties for separate boost system
+        this.boostVelocity = { x: 0, y: 0 };
+        this.boostDecay = 0.94; // How quickly boost velocity decays each frame
+        this.boostDirection = { x: 0, y: 0 };
+        this.boostIntensity = 0; // Current boost intensity (0-1)
+    }
+
+    /**
+     * Create the player sprite
+     * @returns {Phaser.GameObjects.Sprite} The created sprite
+     */
+    create() {
+        try {
+            console.log('Creating player sprite...');
+            // Create the sprite with physics
+            this.sprite = this.scene.physics.add.sprite(
+                this.spawnPoint.x, 
+                this.spawnPoint.y, 
+                'player'
+            );
+            
+            if (!this.sprite) {
+                console.error('Failed to create player sprite');
+                return null;
+            }
+            
+            // Configure physics body
+            const body = this.sprite.body;
+            if (body) {
+                body.setCollideWorldBounds(true);
+                body.setBounce(PLAYER.BOUNCE);
+                body.setDrag(PLAYER.DRAG, PLAYER.DRAG);
+                body.setFriction(PLAYER.FRICTION, PLAYER.FRICTION);
+                body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
+                
+                // Set proper hitbox size and offset
+                body.setSize(80, 120, true);
+                body.setOffset(5, 5);
+                
+                // Enable collision detection and make player immovable
+                body.enable = true;
+                body.setImmovable(true);  // Make player immovable for better collision detection
+                body.pushable = false;    // Prevent being pushed by enemies
+            }
+            
+            // Set up sprite properties
+            this.sprite.setOrigin(0.5, 0.5);
+            this.sprite.setDepth(10);
+            
+            return this.sprite;
+        } catch (error) {
+            console.error('Error in Player.create():', error);
+            return null;
+        }
+    }
+
+    createMaskBubbles() {
+        if (!this.scene.add || !this.scene.add.particles) return;
+
+        try {
+            // Don't create our own mask bubbles - rely on the ParticleSystem
+            
+            // Create a reference to helmet bubbles from the particle system
+            if (this.scene.particleSystem) {
+                this.helmetBubbles = this.scene.particleSystem.createHelmetBubbles(this.sprite, 'bubble');
+            }
+        } catch (error) {
+            console.error('Error creating player bubbles:', error);
+        }
+    }
+
+    /**
+     * Reset the player to a specific position
+     * @param {number} x - X position to reset to
+     * @param {number} y - Y position to reset to
+     */
+    reset(x, y) {
+        this.spawnPoint = { x, y };
+        
+        if (!this.sprite || !this.sprite.body) {
+            if (this.sprite) {
+                this.sprite.destroy();
+            }
+            
+            this.sprite = this.create();
+        } else {
+            this.sprite.setPosition(x, y);
+            this.sprite.setVelocity(0, 0);
+            this.sprite.setAcceleration(0, 0);
+            
+            // Ensure max velocity is reset to normal value
+            this.sprite.body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
+        }
+        
+        if (this.sprite) {
+            if (this.sprite.body && !this.sprite.body.enable) {
+                this.sprite.body.enable = true;
+            }
+            
+            this.sprite.setActive(true);
+            this.sprite.setVisible(true);
+        }
+        
+        this.oxygen = this.maxOxygen;
+        this.health = PLAYER.HEALTH.MAX;
+        this.active = true;
+        this.isDrowning = false;
+        this.boostActive = false;
+        this.boostCooldown = false;
+        this.boostCooldownTime = 0;
+        
+        if (this.scene && this.scene.events) {
+            this.scene.events.emit('playerHealthChanged', this.health, PLAYER.HEALTH.MAX);
+            this.scene.events.emit('playerOxygenChanged', this.oxygen, this.maxOxygen);
+        }
+    }
+
+    /**
+     * Update player state
+     * @param {number} time - Current game time
+     * @param {number} delta - Time elapsed since last update
+     */
+    update(time, delta) {
+        if (!this.active || !this.sprite || !this.sprite.body) {
+            return;
+        }
+        
+        try {
+            const input = this.getInputState();
+            this._inputState = input;
+            
+            this.updateBoost(delta);
+            this.processMovement(input);
+            this.updateOxygen(delta);
+            
+            this.lastPosition = { x: this.sprite.x, y: this.sprite.y };
+        } catch (error) {}
+    }
+
+    /**
+     * Get the current input state for player movement
+     * @returns {Object} The current input state with left, right, up, down, and boost properties
+     */
+    getInputState() {
+        if (!this.scene || !this.scene.input) {
+            return { left: false, right: false, up: false, down: false, boost: false };
+        }
+        
+        const cursors = this.scene.cursors;
+        const keys = this.scene.keys || this.scene.wasdKeys;
+        const touchData = this.scene.touchData;
+
+        if (!keys) {
+            if (cursors) {
+                return {
+                    left: cursors.left?.isDown || false,
+                    right: cursors.right?.isDown || false,
+                    up: cursors.up?.isDown || false, 
+                    down: cursors.down?.isDown || false,
+                    boost: cursors.space?.isDown || false
+                };
+            }
+            
+            return { left: false, right: false, up: false, down: false, boost: false };
+        }
+
+        const keyboardInput = {
+            left: (keys && keys.left?.isDown) || (cursors && cursors.left?.isDown) || false,
+            right: (keys && keys.right?.isDown) || (cursors && cursors.right?.isDown) || false,
+            up: (keys && keys.up?.isDown) || (cursors && cursors.up?.isDown) || false,
+            down: (keys && keys.down?.isDown) || (cursors && cursors.down?.isDown) || false,
+            boost: (keys && keys.boost?.isDown) || (cursors && cursors.space?.isDown) || false
+        };
+
+        const touchInput = {
+            left: touchData?.left || false,
+            right: touchData?.right || false,
+            up: touchData?.up || false,
+            down: touchData?.down || false,
+            boost: touchData?.boost || false
+        };
+
+        return {
+            left: keyboardInput.left || touchInput.left,
+            right: keyboardInput.right || touchInput.right,
+            up: keyboardInput.up || touchInput.up,
+            down: keyboardInput.down || touchInput.down,
+            boost: keyboardInput.boost || touchInput.boost
+        };
+    }
+
+    /**
+     * Process player movement based on input
+     * @param {Object} input - Input state object
+     */
+    processMovement(input) {
+        if (!this.sprite || !this.sprite.body || !this.active) {
+            return;
+        }
+        
+        // Reset acceleration each frame
+        this.sprite.setAcceleration(0, 0);
+        
+        // Store current movement direction
+        let currentDirection = { x: 0, y: 0 };
+        
+        // Get base acceleration value from constants
+        const baseAcceleration = PLAYER.ACCELERATION;
+        
+        // Apply horizontal movement
+        if (input.left) {
+            this.sprite.setAccelerationX(-baseAcceleration);
+            this.sprite.setFlipX(true);
+            currentDirection.x = -1;
+        } else if (input.right) {
+            this.sprite.setAccelerationX(baseAcceleration);
+            this.sprite.setFlipX(false);
+            currentDirection.x = 1;
+        }
+        
+        // Apply vertical movement
+        if (input.up) {
+            this.sprite.setAccelerationY(-baseAcceleration);
+            currentDirection.y = -1;
+        } else if (input.down) {
+            this.sprite.setAccelerationY(baseAcceleration);
+            currentDirection.y = 1;
+        }
+        
+        // Track if player is moving this frame
+        const isMovingNow = currentDirection.x !== 0 || currentDirection.y !== 0;
+        
+        // Check for direction change
+        const directionChanged = 
+            currentDirection.x !== (this.lastDirection?.x || 0) || 
+            currentDirection.y !== (this.lastDirection?.y || 0);
+            
+        // Create movement burst on direction change or start of movement
+        if (isMovingNow && (!this.isMoving || directionChanged) && 
+            (!this._lastMovementBurstTime || (Date.now() - this._lastMovementBurstTime > 500)) && 
+            !this.boostActive) {
+            
+            // Emit movement burst event for particle system to handle
+            this.emit('movementBurst', this.sprite, currentDirection);
+            this._lastMovementBurstTime = Date.now();
+        }
+        
+        // Update movement state
+        this.isMoving = isMovingNow;
+        this.lastDirection = { ...currentDirection };
+        
+        // Handle boosting - completely revised approach
+        if (this.boostActive && this.oxygen > 0) {
+            // Get normalized boost direction vector based on input
+            const boostDirection = this.getBoostDirection(input);
+            
+            // Determine boost speed - use the maximum boost speed
+            const boostSpeed = PLAYER.BOOST.SPEED.MAX_VELOCITY;
+            
+            // Always set velocity directly for instant acceleration to max boost speed
+            // This ensures boosting always reaches the full defined speed regardless of current velocity
+            if (boostDirection.x !== 0 || boostDirection.y !== 0) {
+                // Calculate the exact velocity vector by scaling the direction vector
+                // This guarantees we reach exactly the boost speed in the input direction
+                this.sprite.body.velocity.x = boostDirection.x * boostSpeed;
+                this.sprite.body.velocity.y = boostDirection.y * boostSpeed;
+                
+                // Ensure physics engine doesn't cap our velocity
+                if (this.sprite.body.maxVelocity.x < boostSpeed) {
+                    this.sprite.body.setMaxVelocity(boostSpeed, boostSpeed);
+                }
+            }
+            
+            // Create boost effects at regular intervals
+            const now = Date.now();
+            if (!this._lastBoostParticleTime || (now - this._lastBoostParticleTime > PLAYER.BOOST.BURST_INTERVAL)) {
+                this._lastBoostParticleTime = now;
+                
+                // Check if we're at high speed for effect intensity
+                const speed = Math.sqrt(
+                    this.sprite.body.velocity.x * this.sprite.body.velocity.x + 
+                    this.sprite.body.velocity.y * this.sprite.body.velocity.y
+                );
+                
+                // Use high-speed boost effect if going really fast
+                const isHighSpeed = speed > PLAYER.BOOST.SPEED.MAX_VELOCITY * 0.8;
+                
+                this.emitBoostBurst(isHighSpeed);
+            }
+        } else {
+            // When not boosting, reset to normal max velocity
+            if (this.sprite.body.maxVelocity.x > PLAYER.MAX_VELOCITY) {
+                this.sprite.body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
+            }
+        }
+    }
+    
+    /**
+     * Get normalized boost direction based on input or facing direction
+     * @param {Object} input - Current input state
+     * @returns {Object} Normalized direction vector {x, y}
+     */
+    getBoostDirection(input) {
+        let direction = { x: 0, y: 0 };
+        
+        // Get direction directly from input - ALWAYS USE CURRENT FRAME'S INPUT
+        // This ensures boost responds immediately to direction changes
+        if (input.left) direction.x = -1;
+        else if (input.right) direction.x = 1;
+        
+        if (input.up) direction.y = -1;
+        else if (input.down) direction.y = 1;
+        
+        // If no input direction, use player's facing direction
+        if (direction.x === 0 && direction.y === 0) {
+            direction.x = this.sprite.flipX ? -1 : 1;
+        }
+        
+        // Normalize direction vector to ensure consistent speed in all directions
+        // This is critical for diagonal movement to maintain the same speed as cardinal directions
+        const magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+        if (magnitude > 0 && magnitude !== 1) {
+            direction.x /= magnitude;
+            direction.y /= magnitude;
+        }
+        
+        return direction;
+    }
+    
+    /**
+     * Process boost velocity separately from regular movement
+     * @param {Object} input - Current input state
+     */
+    processBoostVelocity(input) {
+        // This method is now unused - boost handling moved to processMovement
+    }
+
+    /**
+     * Update particle effects based on player movement
+     */
+    updateParticleEffects() {
+        if (!this.sprite || !this.scene.particleSystem) return;
+        
+        this.scene.particleSystem.updateBubbleTrailDirection(
+            this.sprite, 
+            this.sprite.body.velocity
+        );
+        
+        const speed = Math.sqrt(
+            this.sprite.body.velocity.x * this.sprite.body.velocity.x + 
+            this.sprite.body.velocity.y * this.sprite.body.velocity.y
+        );
+        
+        const prevSpeed = this.lastPosition ? Math.sqrt(
+            Math.pow(this.sprite.x - this.lastPosition.x, 2) + 
+            Math.pow(this.sprite.y - this.lastPosition.y, 2)
+        ) : 0;
+        
+        if (speed > 150 && prevSpeed < 50 && this.scene.particleSystem) {
+            const direction = {
+                x: this.sprite.body.velocity.x,
+                y: this.sprite.body.velocity.y
+            };
+            
+            const dirLength = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+            if (dirLength > 0) {
+                direction.x /= dirLength;
+                direction.y /= dirLength;
+            }
+            
+            this.scene.particleSystem.emitMovementBurst(this.sprite, 'bubble', direction);
+        }
+    }
+
+    /**
+     * Update boost state and apply effects
+     * @param {number} delta - Time in ms since last update
+     */
+    updateBoost(delta) {
+        const now = Date.now();
+        
+        // Handle boost cooldown expiration
+        if (this.boostCooldown && now > this.boostCooldownTime) {
+            this.boostCooldown = false;
+        }
+        
+        // Process boost activation/deactivation
+        if (this._inputState?.boost) {
+            // Try to activate boost if not already active and not on cooldown
+            if (!this.boostActive && !this.boostCooldown && this.oxygen > 0) {
+                console.log('BOOST ACTIVATED! 🚀');
+                this.activateBoost();
+                
+                // Always add initial camera shake on boost activation
+                this.emit('cameraShake', CAMERA.SHAKE.DURATION, CAMERA.SHAKE.INTENSITY);
+            }
+            
+            // Consume oxygen while boosting
+            if (this.boostActive && this.oxygen > 0) {
+                // Deplete oxygen faster when boosting (use coefficient for time-based depletion)
+                this.oxygen -= (delta / 1000) * PLAYER.BOOST.OXYGEN_COST;
+                
+                // Handle oxygen depletion during boost
+                if (this.oxygen <= 0) {
+                    this.oxygen = 0;
+                    this.deactivateBoost();
+                    this.emit('playerOxygenChanged', this.oxygen, this.maxOxygen);
+                }
+                
+                // Emit continuous boost particles at regular intervals
+                if (now - (this._lastBoostParticleTime || 0) > PLAYER.BOOST.BURST_INTERVAL) {
+                    this._lastBoostParticleTime = now;
+                    
+                    // Get current speed for effects intensity scaling
+                    const velocity = {
+                        x: this.sprite.body.velocity.x,
+                        y: this.sprite.body.velocity.y
+                    };
+                    
+                    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+                    
+                    console.log('Emitting boost burst particles! 💨');
+                    this.emitBoostBurst(speed);
+                    
+                    // Add camera shake for high speeds (scale intensity with speed)
+                    if (speed > 500) {
+                        const speedFactor = Math.min(1.0, (speed - 500) / 500);
+                        const shakeIntensity = CAMERA.SHAKE.INTENSITY * (1 + speedFactor);
+                        this.emit('cameraShake', CAMERA.SHAKE.DURATION, shakeIntensity);
+                    }
+                }
+            }
+        } else if (this.boostActive) {
+            // Deactivate boost when input is released
+            console.log('BOOST DEACTIVATED');
+            this.deactivateBoost();
+        }
+    }
+
+    /**
+     * Emit a burst of particles when boost is activated
+     * @param {number} speed - Current player speed for effect scaling
+     */
+    emitBoostBurst(speed = 0) {
+        if (!this.sprite || !this.sprite.body) return;
+        
+        console.log('emitBoostBurst called!');
+        
+        // Get the current input state for more responsive direction changes
+        const input = this._inputState || this.getInputState();
+        
+        // Determine particle direction based on input, not velocity
+        // This ensures particles immediately respond to direction changes
+        let direction = { x: 0, y: 0 };
+        
+        // Get direction from input (like in processMovement)
+        if (input.left) direction.x = -1;
+        else if (input.right) direction.x = 1;
+        
+        if (input.up) direction.y = -1;
+        else if (input.down) direction.y = 1;
+        
+        // If no input direction, fallback to facing direction
+        if (direction.x === 0 && direction.y === 0) {
+            direction.x = this.sprite.flipX ? -1 : 1;
+        }
+        
+        // Normalize the direction vector if needed
+        const magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+        if (magnitude > 0 && magnitude !== 1) {
+            direction.x /= magnitude;
+            direction.y /= magnitude;
+        }
+        
+        console.log(`Boost direction: x=${direction.x}, y=${direction.y}, speed=${speed}`);
+        
+        // Add a parameter to indicate if this is a high-speed boost
+        const isHighSpeedBoost = speed > 500;
+        
+        // CRITICAL: Direct call to scene's createBoostParticles method
+        if (this.scene && typeof this.scene.createBoostParticles === 'function') {
+            console.log('Calling scene.createBoostParticles directly');
+            // Pass the high-speed flag to create more dramatic effects at high speeds
+            this.scene.createBoostParticles(this.sprite, direction, isHighSpeedBoost);
+        } else {
+            console.warn('Scene does not have createBoostParticles method, falling back to event');
+            // Fallback to event emission
+            this.emit('boostBurst', this.sprite, direction, isHighSpeedBoost);
+        }
+    }
+
+    /**
+     * Activate the boost
+     */
+    activateBoost() {
+        if (this.boostCooldown || this.boostActive || this.oxygen <= 0) return;
+        
+        this.boostActive = true;
+        
+        // Visual feedback
+        if (this.scene.events) {
+            this.scene.events.emit('playerBoostActivated');
+        }
+        
+        console.log('Boost activated!');
+    }
+    
+    /**
+     * Deactivate the boost
+     */
+    deactivateBoost() {
+        if (!this.boostActive) return;
+        
+        this.boostActive = false;
+        this.boostCooldown = true;
+        this.boostCooldownTime = Date.now() + PLAYER.BOOST.COOLDOWN;
+        
+        // Visual feedback
+        if (this.scene.events) {
+            this.scene.events.emit('playerBoostDeactivated');
+        }
+        
+        console.log('Boost deactivated, cooldown started');
+    }
+
+    /**
+     * Update oxygen level over time
+     * @param {number} delta - Time in ms since last update
+     */
+    updateOxygen(delta) {
+        // Skip if player is dead
+        if (!this.active) return;
+        
+        const oldOxygen = this.oxygen;
+        
+        if (this.isInAirPocket) {
+            // Refill oxygen when in an air pocket - instant refill like in original game
+            this.oxygen = this.maxOxygen;
+        } else if (this.boostActive) {
+            // Oxygen depletion is handled in updateBoost when boost is active
+        } else {
+            // Normal oxygen depletion
+            this.oxygen -= (delta / 1000) * OXYGEN.DRAIN_RATE;
+        }
+        
+        // Ensure oxygen stays within bounds
+        this.oxygen = Phaser.Math.Clamp(this.oxygen, 0, this.maxOxygen);
+        
+        // Only emit event if oxygen changed
+        if (oldOxygen !== this.oxygen) {
+            this.emit('playerOxygenChanged', this.oxygen, this.maxOxygen);
+            
+            // Handle low oxygen state
+            const isLowOxygenNow = this.oxygen <= this.maxOxygen * 0.3;
+            if (isLowOxygenNow !== this.isLowOxygen) {
+                this.isLowOxygen = isLowOxygenNow;
+                this.emit('playerLowOxygen', this.isLowOxygen);
+            }
+            
+            // Handle oxygen depletion
+            if (this.oxygen <= 0 && !this.oxygenDepleted) {
+                this.oxygenDepleted = true;
+                this.emit('playerOxygenDepleted');
+            } else if (this.oxygen > 0 && this.oxygenDepleted) {
+                this.oxygenDepleted = false;
+            }
+        }
+    }
+
+    /**
+     * Check if player can boost
+     * @returns {boolean} True if player can boost
+     */
+    canBoost() {
+        if (this.boostActive || this.boostCooldown) {
+            return false;
+        }
+        
+        const minOxygenRequired = this.maxOxygen * 0.1;
+        return this.oxygen > minOxygenRequired;
+    }
+
+    /**
+     * Add oxygen to the player
+     * @param {number} amount - Amount of oxygen to add
+     */
+    addOxygen(amount) {
+        if (amount <= 0) return;
+        
+        this.oxygen = Math.min(this.maxOxygen, this.oxygen + amount);
+        this.oxygenDepleted = false;
+        
+        this.emit('oxygenChange', this.oxygen, this.maxOxygen);
+        return this.oxygen;
+    }
+
+    destroy() {
+        if (this.maskBubbles) {
+            this.maskBubbles.destroy();
+            this.maskBubbles = null;
+        }
+        
+        if (this.helmetBubbles) {
+            this.helmetBubbles.destroy();
+            this.helmetBubbles = null;
+        }
+    }
+
+    /**
+     * Update player health
+     * @param {number} delta - Time since last update
+     */
+    updateHealth(delta) {
+        if (!this.isDrowning && this.health < PLAYER.HEALTH.MAX) {
+            this.health += (delta / 1000) * PLAYER.HEALTH.RECOVERY_RATE;
+            this.health = Math.min(this.health, PLAYER.HEALTH.MAX);
+        }
+        
+        if (this.health <= 0 && this.active) {
+            this.die();
+        }
+    }
+    
+    /**
+     * Apply damage to the player
+     * @param {number} amount - Amount of damage to apply
+     */
+    takeDamage(amount) {
+        if (!this.active) return;
+        
+        this.health -= amount;
+        this.health = Math.max(0, this.health);
+        
+        if (amount > 0.1) {
+            this.scene.cameras.main.shake(100, 0.01 * amount);
+        }
+        
+        this.emit('healthChange', this.health, PLAYER.HEALTH.MAX);
+        
+        if (this.health <= 0 && !this.isDead) {
+            this.die();
+        }
+    }
+    
+    /**
+     * Handle player death
+     */
+    die() {
+        this.active = false;
+        
+        if (this.sprite) {
+            this.sprite.setTint(0xff0000);
+            this.sprite.setAlpha(0.7);
+        }
+        
+        if (this.scene.playerDied) {
+            this.scene.playerDied();
+        }
+    }
+    
+    /**
+     * Set whether the player is in an air pocket
+     * @param {boolean} isInPocket - Whether in an air pocket
+     */
+    setInAirPocket(isInPocket) {
+        this.isInAirPocket = isInPocket;
+    }
+    
+    /**
+     * Get the player's current position
+     * @returns {object} - Position with x and y coordinates
+     */
+    getPosition() {
+        return this.sprite ? { x: this.sprite.x, y: this.sprite.y } : this.spawnPoint;
+    }
+
+    handleMovement(time, delta) {
+        if (!this.sprite || !this.scene.keys) return;
+        
+        const keys = this.scene.keys;
+        const sprite = this.sprite;
+        
+        // Get current velocity for momentum calculations
+        const currentVelX = sprite.body.velocity.x;
+        const currentVelY = sprite.body.velocity.y;
+        
+        // Calculate target velocity based on input
+        let targetVelX = 0;
+        let targetVelY = 0;
+        
+        if (keys.left.isDown) {
+            targetVelX = -this.moveSpeed;
+            // Only update facing direction when actively pressing movement keys
+            sprite.flipX = true;
+        }
+        if (keys.right.isDown) {
+            targetVelX = this.moveSpeed;
+            // Only update facing direction when actively pressing movement keys
+            sprite.flipX = false;
+        }
+        if (keys.up.isDown) {
+            targetVelY = -this.moveSpeed;
+        }
+        if (keys.down.isDown) {
+            targetVelY = this.moveSpeed;
+        }
+        
+        // Apply smooth acceleration/deceleration
+        sprite.body.velocity.x = Phaser.Math.Linear(
+            currentVelX,
+            targetVelX,
+            this.acceleration * (delta / 1000)
+        );
+        
+        sprite.body.velocity.y = Phaser.Math.Linear(
+            currentVelY,
+            targetVelY,
+            this.acceleration * (delta / 1000)
+        );
+        
+        // Update last position for movement tracking
+        if (!this.lastPosition) {
+            this.lastPosition = { x: sprite.x, y: sprite.y };
+        }
+        
+        // Emit movement event if there's significant movement
+        const dx = sprite.x - this.lastPosition.x;
+        const dy = sprite.y - this.lastPosition.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > 1) {
+            this.emit('movement', {
+                x: dx,
+                y: dy,
+                distance: distance
+            });
+            
+            // Update last position
+            this.lastPosition.x = sprite.x;
+            this.lastPosition.y = sprite.y;
+        }
+    }
+} 

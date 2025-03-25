@@ -1,0 +1,17 @@
+{
+  "extends": "@parcel/config-default",
+  "transformers": {
+    "*.{png,jpg,jpeg,gif,mp3,wav}": ["@parcel/transformer-raw"]
+  },
+  "resolvers": ["@parcel/resolver-default"],
+  "packagers": {
+    "*.html": "@parcel/packager-html",
+    "*.js": "@parcel/packager-js",
+    "*.css": "@parcel/packager-css"
+  },
+  "optimizers": {
+    "*.js": ["@parcel/optimizer-terser"],
+    "*.css": ["@parcel/optimizer-cssnano"],
+    "*.html": ["@parcel/optimizer-htmlnano"]
+  }
+} 

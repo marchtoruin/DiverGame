@@ -1,0 +1,161 @@
+/**
+ * Game constants to avoid magic numbers throughout the codebase
+ */
+export const GAME_WIDTH = 800;
+export const GAME_HEIGHT = 600;
+export const GAME_GRAVITY = 0; // Add default gravity for the game (0 for underwater)
+
+// Player constants
+export const PLAYER = {
+    STARTING_X: 100,
+    STARTING_Y: 100,
+    SPEED: 200,
+    MOVE_SPEED: 200,
+    BOOST_SPEED: 900, // Increased for more dramatic boost
+    MAX_VELOCITY: 250, // Unchanged - max regular swimming speed
+    DRAG: 80, // Slightly reduced to maintain momentum longer
+    BOOST_DURATION: 1000, // Duration of boost in milliseconds
+    ACCELERATION: 200, // Base acceleration for player movement
+    HITBOX: {
+        WIDTH: 60,
+        HEIGHT: 80,
+        OFFSET_X: 10,
+        OFFSET_Y: 20
+    },
+    HEALTH: {
+        MAX: 100,
+        DAMAGE: {
+            OBSTACLE: 10,
+            NO_OXYGEN: 5
+        }
+    },
+    OXYGEN_DEPLETION_DAMAGE: 5,
+    BOOST: {
+        SPEED: {
+            MAX_VELOCITY: 1020, // Reduced by 15% from 1200
+            SUPER_BOOST: 1530  // Reduced by 15% from 1800
+        },
+        OXYGEN_COST: 5, // Oxygen units per second during boost
+        COOLDOWN: 200, // Reduced for better responsiveness
+        BURST_INTERVAL: 40 // Slightly reduced for more frequent particles
+    },
+    BOUNCE: 0.1, // Player bounce factor from collisions
+    FRICTION: 0.1 // Player friction factor
+};
+
+// Animation constants
+export const ANIMATIONS = {
+    IDLE_SWIM: {
+        KEY: 'idle_swim',
+        FRAME_RATE: 6,
+        FRAME_WIDTH: 87,     // Updated to match actual sprite dimensions (261 ÷ 3 frames)
+        FRAME_HEIGHT: 102,   // Updated to match actual sprite height
+        FRAMES: 3            // Total number of frames in the animation
+    },
+    DROWNING: {
+        KEY: 'drowning',
+        FRAME_RATE: 4
+    }
+};
+
+// Physics constants
+export const PHYSICS = {
+    TILE_BIAS: 64, // Increased to prevent tunneling through tiles
+    BOUNCE: 0.1,
+    FRICTION: 0.1,
+    WORLD_BOUNDS: {
+        WIDTH: 1600,  // Match original game's world size
+        HEIGHT: 1200  // Match original game's world size
+    }
+};
+
+// Particle effects constants
+export const PARTICLES = {
+    BUBBLE: {
+        SCALE: { START: 0.1, END: 0.02 },
+        ALPHA: { START: 0.6, END: 0 },
+        SPEED: { MIN: 40, MAX: 80 },
+        LIFESPAN: 3000,
+        FREQUENCY: 300,
+        QUANTITY: 1
+    },
+    MOVEMENT: {
+        SCALE: { START: 0.2, END: 0.05 },
+        ALPHA: { START: 0.9, END: 0 },
+        SPEED: { MIN: 250, MAX: 400 },
+        LIFESPAN: 1000,
+        FREQUENCY: 20,
+        QUANTITY: 3
+    },
+    BOOST: {
+        SCALE: { START: 0.15, END: 0.05 },
+        ALPHA: { START: 1.0, END: 0 },
+        SPEED: { MIN: 600, MAX: 900 },
+        LIFESPAN: 1200,
+        PARTICLE_COUNT: 45
+    }
+};
+
+// Oxygen system constants
+export const OXYGEN = {
+    MAX: 100,
+    DRAIN_RATE: 1,        // Units per second (reduced from 2)
+    DRAIN_RATE_BOOST: 5,  // Units per second when boosting (reduced from 10)
+    REFILL_RATE: 100,     // Units per second when in air pocket (changed to instant refill)
+    MAX_DISPLAY_WIDTH: 400, // Increased to match original game
+    COLOR: {
+        NORMAL: 0x00a0ff,   // Blue for normal oxygen (changed from green)
+        WARNING: 0xe74c3c,  // Red when low
+        CRITICAL: 0xff0000, // Bright red when critical
+        BOOST: 0x00ffff     // Cyan when boosting
+    }
+};
+
+// Camera constants
+export const CAMERA = {
+    FOLLOW: true,
+    DEADZONE: {
+        WIDTH: 200,
+        HEIGHT: 200
+    },
+    LERP: 0.1,
+    ZOOM: {
+        DEFAULT: 1,
+        MIN: 0.5,
+        MAX: 1.5,
+        STEP: 0.1
+    },
+    SHAKE: {
+        DURATION: 100,
+        INTENSITY: 0.003
+    }
+};
+
+// Air pocket constants
+export const AIR_POCKET = {
+    SCALE: 0.165,
+    BASE_SPEED: {
+        MIN: 350, // Half of original game (700) for slower movement
+        MAX: 400  // Half of original game (800) for slower movement
+    },
+    WOBBLE: {
+        SPEED: {
+            MIN: 0.02,
+            MAX: 0.04
+        },
+        AMPLITUDE: {
+            MIN: 10,
+            MAX: 20
+        }
+    },
+    // RESPAWN_TIME: 8000, // 8 seconds (same as original game) - Removed to use Tiled respawn time
+    VARIATIONS: 3       // Number of air pocket variations
+};
+
+// Audio system constants
+export const AUDIO = {
+    MUSIC_VOLUME: 0.5,
+    AMBIENCE_VOLUME: 0.3,
+    EFFECTS_VOLUME: 0.7,
+    MASTER_VOLUME: 1.0
+}; 

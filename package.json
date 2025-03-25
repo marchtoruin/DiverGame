@@ -1,0 +1,43 @@
+{
+  "name": "underwater-game",
+  "version": "1.0.0",
+  "description": "An underwater exploration game built with Phaser 3",
+  "scripts": {
+    "start": "parcel src/index.html",
+    "clean": "rimraf .parcel-cache dist",
+    "build": "npm run clean && parcel build src/index.html --public-url ./",
+    "deploy": "npm run build && gh-pages -d dist"
+  },
+  "keywords": [
+    "game",
+    "phaser",
+    "underwater"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "phaser": "^3.60.0"
+  },
+  "devDependencies": {
+    "@parcel/config-default": "^2.14.1",
+    "@parcel/core": "2.14.1",
+    "@parcel/optimizer-cssnano": "2.14.1",
+    "@parcel/optimizer-htmlnano": "2.14.1",
+    "@parcel/optimizer-terser": "2.14.1",
+    "@parcel/packager-css": "2.14.1",
+    "@parcel/packager-html": "2.14.1",
+    "@parcel/packager-js": "2.14.1",
+    "@parcel/reporter-cli": "2.14.1",
+    "@parcel/resolver-default": "2.14.1",
+    "@parcel/runtime-browser-hmr": "2.14.1",
+    "@parcel/runtime-js": "2.14.1",
+    "@parcel/transformer-css": "2.14.1",
+    "@parcel/transformer-html": "2.14.1",
+    "@parcel/transformer-js": "2.14.1",
+    "@parcel/transformer-raw": "2.14.1",
+    "gh-pages": "^5.0.0",
+    "parcel": "^2.14.1",
+    "process": "^0.11.10",
+    "rimraf": "^6.0.1"
+  }
+}

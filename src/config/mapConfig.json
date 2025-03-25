@@ -1,0 +1,29 @@
+{
+    "layerTypes": {
+        "background": {
+            "depth": 10,
+            "scrollFactor": 0.1,
+            "scale": 1.0,
+            "pattern": "^background$"
+        },
+        "background_sprites": {
+            "depth": 20,
+            "scrollFactor": 0.3,
+            "scale": 1.0,
+            "pattern": "^background_sprites$"
+        },
+        "midground": {
+            "depth": 30,
+            "scrollFactor": 0.7,
+            "scale": 1.0,
+            "pattern": "^midground"
+        },
+        "obstacles": {
+            "depth": 40,
+            "scrollFactor": 1.0,
+            "scale": 1.0,
+            "pattern": "^obstacles$",
+            "collision": true
+        }
+    }
+} 

@@ -1,0 +1,33 @@
+{
+    "tileSize": 32,
+    "mapWidth": 100,
+    "mapHeight": 300,
+    "layers": [
+        {
+            "name": "background",
+            "type": "tilelayer",
+            "opacity": 1
+        },
+        {
+            "name": "midground",
+            "type": "tilelayer",
+            "opacity": 0.8
+        },
+        {
+            "name": "obstacles",
+            "type": "tilelayer",
+            "opacity": 1,
+            "properties": [
+                {
+                    "name": "collision",
+                    "type": "bool",
+                    "value": true
+                }
+            ]
+        },
+        {
+            "name": "objects",
+            "type": "objectgroup"
+        }
+    ]
+} 
