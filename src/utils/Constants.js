@@ -11,11 +11,34 @@ export const PLAYER = {
     STARTING_Y: 100,
     SPEED: 200,
     MOVE_SPEED: 200,
-    BOOST_SPEED: 900, // Increased for more dramatic boost
-    MAX_VELOCITY: 250, // Unchanged - max regular swimming speed
-    DRAG: 80, // Slightly reduced to maintain momentum longer
-    BOOST_DURATION: 1000, // Duration of boost in milliseconds
-    ACCELERATION: 200, // Base acceleration for player movement
+    MAX_VELOCITY: 250,
+    DRAG: 80,
+    ACCELERATION: 200,
+    GRAVITY: 200,
+    TREAD_FORCE: 185,  // Slightly increased to allow initial good resistance
+    TREAD_WATER: {
+        VELOCITY_DAMPEN: 0.96,
+        MAX_FALL_SPEED: 300,    
+        DRAG_MULTIPLIER: 2.2,
+        MOMENTUM_THRESHOLD: -50,
+        STAMINA: {
+            MAX_DURATION: 2200,      // Total duration including decay (ms)
+            DECAY_START: 2000,       // Hold full effectiveness for 2 seconds
+            MIN_EFFECTIVENESS: 0,     // Complete loss of tread force when depleted
+            RECOVERY_RATE: 0.4,      // Keep recovery rate the same
+            DECAY_RATE: 0.9          // Even faster decay for more dramatic drop-off
+        },
+        TREAD_SCALING: {
+            MIN_FORCE: 0.65,
+            SPEED_THRESHOLD: 275
+        },
+        POST_BOOST: {
+            GRAVITY_SCALE: 1.5,
+            GRACE_PERIOD: 400,
+            MAX_DRIFT_SPEED: 200,
+            POST_ARC_GRAVITY: 1.2
+        }
+    },
     HITBOX: {
         WIDTH: 60,
         HEIGHT: 80,
@@ -32,15 +55,14 @@ export const PLAYER = {
     OXYGEN_DEPLETION_DAMAGE: 5,
     BOOST: {
         SPEED: {
-            MAX_VELOCITY: 1020, // Reduced by 15% from 1200
-            SUPER_BOOST: 1530  // Reduced by 15% from 1800
+            MAX_VELOCITY: 600, // Reduced for better control
+            SUPER_BOOST: 800  // Maximum boost speed
         },
-        OXYGEN_COST: 5, // Oxygen units per second during boost
-        COOLDOWN: 200, // Reduced for better responsiveness
-        BURST_INTERVAL: 40 // Slightly reduced for more frequent particles
+        OXYGEN_COST: 2, // Oxygen units per second during boost
+        BURST_INTERVAL: 40 // Milliseconds between particle bursts during boost
     },
-    BOUNCE: 0.1, // Player bounce factor from collisions
-    FRICTION: 0.1 // Player friction factor
+    BOUNCE: 0.1,
+    FRICTION: 0.1
 };
 
 // Animation constants

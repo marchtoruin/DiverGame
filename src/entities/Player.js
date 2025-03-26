@@ -39,6 +39,14 @@ export default class Player extends Phaser.Events.EventEmitter {
         this.boostDecay = 0.94; // How quickly boost velocity decays each frame
         this.boostDirection = { x: 0, y: 0 };
         this.boostIntensity = 0; // Current boost intensity (0-1)
+        
+        // Initialize tread water stamina
+        this.treadStamina = {
+            lastTreadStart: 0,
+            currentTreadDuration: 0,
+            effectiveness: 1,
+            isRecovering: true
+        };
     }
 
     /**
@@ -254,13 +262,104 @@ export default class Player extends Phaser.Events.EventEmitter {
             currentDirection.x = 1;
         }
         
-        // Apply vertical movement
-        if (input.up) {
-            this.sprite.setAccelerationY(-baseAcceleration);
+        // Update tread stamina and get current effectiveness
+        const treadEffectiveness = this.updateTreadStamina(input);
+        
+        // Handle post-boost momentum
+        const timeSinceBoost = this.lastBoostEndTime ? Date.now() - this.lastBoostEndTime : null;
+        const inPostBoostGrace = timeSinceBoost && timeSinceBoost < PLAYER.TREAD_WATER.POST_BOOST.GRACE_PERIOD;
+        const hasUpwardMomentum = this.sprite.body.velocity.y < 0;
+        
+        // Calculate gravity scale based on post-boost state
+        let gravityScale = 1;
+        if (timeSinceBoost && hasUpwardMomentum) {
+            if (inPostBoostGrace) {
+                if (this.sprite.body.velocity.y < -PLAYER.TREAD_WATER.POST_BOOST.MAX_DRIFT_SPEED) {
+                    this.sprite.body.velocity.y = -PLAYER.TREAD_WATER.POST_BOOST.MAX_DRIFT_SPEED;
+                }
+                gravityScale = 0.5;
+            } else {
+                gravityScale = PLAYER.TREAD_WATER.POST_BOOST.GRAVITY_SCALE;
+            }
+        }
+        
+        // Apply scaled gravity
+        this.sprite.setAccelerationY(PLAYER.GRAVITY * gravityScale);
+        
+        // Only apply tread force if we have any effectiveness left
+        if (input.up && treadEffectiveness > 0) {
+            const currentVelocityY = this.sprite.body.velocity.y;
+            const isFalling = currentVelocityY > 0;
+            
+            // Calculate tread force with momentum preservation and stamina
+            let effectiveTreadForce = PLAYER.TREAD_FORCE * treadEffectiveness;
+            
+            if (isFalling) {
+                const fallSpeedRatio = Math.min(1, currentVelocityY / PLAYER.TREAD_WATER.MAX_FALL_SPEED);
+                effectiveTreadForce *= (1 - fallSpeedRatio * 0.3);
+            }
+            
+            // Apply the stamina-adjusted tread force
+            this.sprite.setAccelerationY(PLAYER.GRAVITY * gravityScale - effectiveTreadForce);
             currentDirection.y = -1;
-        } else if (input.down) {
-            this.sprite.setAccelerationY(baseAcceleration);
-            currentDirection.y = 1;
+            
+            if (isFalling) {
+                this.sprite.body.velocity.y *= PLAYER.TREAD_WATER.VELOCITY_DAMPEN;
+                
+                if (this.sprite.body.velocity.y > PLAYER.TREAD_WATER.MAX_FALL_SPEED) {
+                    this.sprite.body.velocity.y = PLAYER.TREAD_WATER.MAX_FALL_SPEED;
+                }
+            }
+            
+            this.sprite.body.setDragY(PLAYER.DRAG * PLAYER.TREAD_WATER.DRAG_MULTIPLIER);
+        } else {
+            // When not treading or when stamina is depleted, use base drag
+            this.sprite.body.setDragY(PLAYER.DRAG);
+        }
+        
+        // Handle boost (triggered by spacebar)
+        if (input.boost && this.oxygen > 0) {
+            if (!this.boostActive) {
+                this.boostActive = true;
+                this.emit('boostStart');
+            }
+            
+            // Calculate boost direction based on input
+            const boostDirection = this.getBoostDirection(input);
+            const boostSpeed = PLAYER.BOOST.SPEED.MAX_VELOCITY;
+            
+            // Apply boost velocity
+            if (boostDirection.x !== 0 || boostDirection.y !== 0) {
+                this.sprite.body.velocity.x = boostDirection.x * boostSpeed;
+                this.sprite.body.velocity.y = boostDirection.y * boostSpeed;
+                
+                // Ensure physics engine doesn't cap our velocity during boost
+                if (this.sprite.body.maxVelocity.x < boostSpeed) {
+                    this.sprite.body.setMaxVelocity(boostSpeed, boostSpeed);
+                }
+            }
+            
+            // Consume oxygen while boosting
+            this.oxygen = Math.max(0, this.oxygen - PLAYER.BOOST.OXYGEN_COST * (1/60)); // Assuming 60 FPS
+            this.emit('oxygenChanged', this.oxygen, this.maxOxygen);
+            
+            // Create boost effects
+            const now = Date.now();
+            if (!this._lastBoostParticleTime || (now - this._lastBoostParticleTime > PLAYER.BOOST.BURST_INTERVAL)) {
+                this._lastBoostParticleTime = now;
+                this.emitBoostBurst(true);
+            }
+        } else {
+            // When not boosting
+            if (this.boostActive) {
+                this.boostActive = false;
+                this.emit('boostEnd');
+            }
+            
+            // Reset to normal max velocity
+            if (this.sprite.body.maxVelocity.x > PLAYER.MAX_VELOCITY) {
+                this.sprite.body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
+            }
         }
         
         // Track if player is moving this frame
@@ -276,7 +375,6 @@ export default class Player extends Phaser.Events.EventEmitter {
             (!this._lastMovementBurstTime || (Date.now() - this._lastMovementBurstTime > 500)) && 
             !this.boostActive) {
             
-            // Emit movement burst event for particle system to handle
             this.emit('movementBurst', this.sprite, currentDirection);
             this._lastMovementBurstTime = Date.now();
         }
@@ -284,51 +382,6 @@ export default class Player extends Phaser.Events.EventEmitter {
         // Update movement state
         this.isMoving = isMovingNow;
         this.lastDirection = { ...currentDirection };
-        
-        // Handle boosting - completely revised approach
-        if (this.boostActive && this.oxygen > 0) {
-            // Get normalized boost direction vector based on input
-            const boostDirection = this.getBoostDirection(input);
-            
-            // Determine boost speed - use the maximum boost speed
-            const boostSpeed = PLAYER.BOOST.SPEED.MAX_VELOCITY;
-            
-            // Always set velocity directly for instant acceleration to max boost speed
-            // This ensures boosting always reaches the full defined speed regardless of current velocity
-            if (boostDirection.x !== 0 || boostDirection.y !== 0) {
-                // Calculate the exact velocity vector by scaling the direction vector
-                // This guarantees we reach exactly the boost speed in the input direction
-                this.sprite.body.velocity.x = boostDirection.x * boostSpeed;
-                this.sprite.body.velocity.y = boostDirection.y * boostSpeed;
-                
-                // Ensure physics engine doesn't cap our velocity
-                if (this.sprite.body.maxVelocity.x < boostSpeed) {
-                    this.sprite.body.setMaxVelocity(boostSpeed, boostSpeed);
-                }
-            }
-            
-            // Create boost effects at regular intervals
-            const now = Date.now();
-            if (!this._lastBoostParticleTime || (now - this._lastBoostParticleTime > PLAYER.BOOST.BURST_INTERVAL)) {
-                this._lastBoostParticleTime = now;
-                
-                // Check if we're at high speed for effect intensity
-                const speed = Math.sqrt(
-                    this.sprite.body.velocity.x * this.sprite.body.velocity.x + 
-                    this.sprite.body.velocity.y * this.sprite.body.velocity.y
-                );
-                
-                // Use high-speed boost effect if going really fast
-                const isHighSpeed = speed > PLAYER.BOOST.SPEED.MAX_VELOCITY * 0.8;
-                
-                this.emitBoostBurst(isHighSpeed);
-            }
-        } else {
-            // When not boosting, reset to normal max velocity
-            if (this.sprite.body.maxVelocity.x > PLAYER.MAX_VELOCITY) {
-                this.sprite.body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
-            }
-        }
     }
     
     /**
@@ -550,6 +603,14 @@ export default class Player extends Phaser.Events.EventEmitter {
         this.boostActive = false;
         this.boostCooldown = true;
         this.boostCooldownTime = Date.now() + PLAYER.BOOST.COOLDOWN;
+        
+        // Store the time when boost was deactivated for post-boost momentum
+        this.lastBoostEndTime = Date.now();
+        // Store the velocity at boost end for momentum calculation
+        this.postBoostVelocity = {
+            x: this.sprite.body.velocity.x,
+            y: this.sprite.body.velocity.y
+        };
         
         // Visual feedback
         if (this.scene.events) {
@@ -775,5 +836,39 @@ export default class Player extends Phaser.Events.EventEmitter {
             this.lastPosition.x = sprite.x;
             this.lastPosition.y = sprite.y;
         }
+    }
+
+    updateTreadStamina(input) {
+        const now = Date.now();
+        const stamina = PLAYER.TREAD_WATER.STAMINA;
+        
+        if (input.up) {
+            // If we just started treading
+            if (this.treadStamina.isRecovering) {
+                this.treadStamina.lastTreadStart = now;
+                this.treadStamina.isRecovering = false;
+            }
+            
+            // Calculate how long we've been treading
+            this.treadStamina.currentTreadDuration = now - this.treadStamina.lastTreadStart;
+            
+            // If we're past the decay start time
+            if (this.treadStamina.currentTreadDuration > stamina.DECAY_START) {
+                // Calculate effectiveness based on how long past decay start we are
+                const decayTime = this.treadStamina.currentTreadDuration - stamina.DECAY_START;
+                const decayProgress = Math.min(1, decayTime / (stamina.MAX_DURATION - stamina.DECAY_START));
+                
+                // Exponential decay of effectiveness
+                this.treadStamina.effectiveness = 1 - (1 - stamina.MIN_EFFECTIVENESS) * 
+                    (1 - Math.pow(1 - decayProgress, stamina.DECAY_RATE));
+            }
+        } else {
+            // Recover stamina when not treading
+            this.treadStamina.isRecovering = true;
+            this.treadStamina.effectiveness = Math.min(1, 
+                this.treadStamina.effectiveness + stamina.RECOVERY_RATE * (this.scene.game.loop.delta / 1000));
+        }
+        
+        return this.treadStamina.effectiveness;
     }
 } 
