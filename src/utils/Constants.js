@@ -180,4 +180,32 @@ export const AUDIO = {
     AMBIENCE_VOLUME: 0.3,
     EFFECTS_VOLUME: 0.7,
     MASTER_VOLUME: 1.0
+};
+
+// Add lighting constants
+export const LIGHTING = {
+    TRANSITION_SPEED: 0.0004,  // Extremely slow for ultra-smooth transitions
+    ZONE_LEVELS: {
+        DEFAULT: 0,     // Default brightness (no darkening)
+        DIM: 0.4,       // 40% darkness
+        DARK: 0.7,      // 70% darkness
+        BLACK: 0.9      // 90% darkness
+    },
+    FLASHLIGHT: {
+        CONE_ANGLE: Math.PI / 6,  // 30 degrees for more focused beam
+        LENGTH: 600,              // Much longer beam
+        GRADIENT: {
+            INNER: { color: 0xffff80, alpha: 0.8 },  // Brighter center
+            MIDDLE: { color: 0xffff80, alpha: 0.4 },
+            OUTER: { color: 0xffff80, alpha: 0 }
+        },
+        FEATHER: {
+            STEPS: 15,           // More steps for smoother feathering
+            EDGE_SOFTNESS: 0.3   // How soft the edges should be (0-1)
+        },
+        OFFSET: {
+            X: 100,              // Position ahead of player
+            Y: 0
+        }
+    }
 }; 

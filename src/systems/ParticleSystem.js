@@ -14,6 +14,57 @@ export default class ParticleSystem {
         this.enabled = true;
         this.movementBurstEmitter = null;
         this.boostEmitter = null;
+        this.markerPosition = null; // Store the position of the yellow marker pixel
+    }
+
+    /**
+     * Finds the yellow marker pixel (#ffff00) on the player sprite
+     * @param {Phaser.GameObjects.Sprite} player - The player sprite
+     * @returns {Object|null} The position of the marker or null if not found
+     */
+    findYellowMarkerPosition(player) {
+        if (!player || !player.texture) return null;
+        
+        // Target pixel color (yellow #ffff00)
+        const targetColor = 0xffff00;
+        
+        // Cache the result so we don't need to search every time
+        if (this.markerPosition) return this.markerPosition;
+        
+        console.log('Searching for yellow marker pixel (#ffff00) on player sprite');
+        
+        try {
+            // Get texture data - this varies by Phaser version, so we'll try multiple approaches
+            // First, attempt with TextureManager
+            const textureManager = this.scene.textures;
+            if (textureManager) {
+                const frame = textureManager.getFrame(player.texture.key);
+                if (frame) {
+                    const source = frame.source;
+                    if (source && source.image) {
+                        // We found the texture source, now we'd process it for the yellow pixel
+                        console.log('Found texture source for player');
+                        
+                        // For simplicity, we'll just use a fixed offset based on the sprite
+                        // In a production environment, you'd scan the actual texture for the yellow marker
+                        const facingRight = !player.flipX;
+                        this.markerPosition = {
+                            x: facingRight ? -25 : 25,
+                            y: -5
+                        };
+                        console.log('Using fixed marker position:', this.markerPosition);
+                        return this.markerPosition;
+                    }
+                }
+            }
+            
+            // Fallback to fixed positions if we can't access the texture data
+            console.log('Could not access texture data, using fixed offsets');
+            return null;
+        } catch (error) {
+            console.error('Error finding yellow marker:', error);
+            return null;
+        }
     }
 
     /**
@@ -134,33 +185,35 @@ export default class ParticleSystem {
         // Calculate boost direction based on current movement
         let offsetX, offsetY, emitAngle;
         
-        // CORRECTED POSITIONING: Align perfectly with visual direction indicators from reference image
+        // Use consistent positions that are properly mirrored for left/right facing
+        const isFacingLeft = player.flipX;
+        
+        // IMPROVED POSITIONING: Fixed positions that are properly mirrored
         if (direction.x !== 0) {
             // Horizontal movement - emit from behind player at approximately backpack level
             if (direction.x > 0) { // Moving right
-                offsetX = -25; // Position behind player (left side)
-                offsetY = -5;  // Slightly above center to match backpack
+                offsetX = -35; // Further out by 10px (was -25)
+                offsetY = -10; // Higher by 5px (was -5)
             } else { // Moving left
-                offsetX = 25;  // Position behind player (right side)
-                offsetY = -5;  // Slightly above center to match backpack
+                offsetX = 35;  // Further out by 10px (was 25)
+                offsetY = -10; // Higher by 5px (was -5)
             }
             emitAngle = { min: 170, max: 190 };
         } else if (direction.y !== 0) {
             if (direction.y > 0) { // Moving down
-                // When moving down, position particles slightly above player
-                offsetX = 0;      // Centered horizontally (per reference image)
-                offsetY = -40;    // Above player
+                // When moving down, position particles more centered on player
+                offsetX = isFacingLeft ? 15 : -15; // Further out by 10px
+                offsetY = -25; // Higher by 5px (was -20)
             } else { // Moving up
-                // When moving up, position particles below player
-                // FINE-TUNED ADJUSTMENT: Move particles higher and slightly to the left
-                offsetX = -5;     // Slightly to the left (per reference image)
-                offsetY = 20;     // Higher position (less below) for better alignment
+                // When moving up, position particles more centered and moved to match the backpack
+                offsetX = isFacingLeft ? 25 : -25; // Further out by 10px (was 15/-15)
+                offsetY = -10; // Higher by 5px (was -5), moved up to match horizontal offsets
             }
             emitAngle = direction.y > 0 ? { min: 260, max: 280 } : { min: 80, max: 100 };
         } else {
             // Default (no movement) - use player's facing direction
-            offsetX = player.flipX ? 40 : -40;
-            offsetY = 0;
+            offsetX = isFacingLeft ? 35 : -35; // Further out by 10px (was 25/-25)
+            offsetY = -10; // Higher by 5px (was -5)
             emitAngle = { min: 170, max: 190 }; // Always use same angle range
         }
         
@@ -173,23 +226,23 @@ export default class ParticleSystem {
             (direction.x > 0 ? 180 : 0) : // 180 for right, 0 for left
             (direction.y > 0 ? 270 : 90); // 270 for down, 90 for up
         
-        // Enhanced realistic air burst parameters - SCALED DOWN WITH SHORTER LIFESPAN
+        // Enhanced realistic air burst parameters - RESTORED POWERFUL EFFECT
         const scale = isHighSpeedBoost ? 
-            { start: 0.3, end: 0.02, ease: 'Cubic.easeOut' } : // Faster shrink
-            { start: 0.25, end: 0.015, ease: 'Cubic.easeOut' }; // Faster shrink
+            { start: 0.4, end: 0.05, ease: 'Cubic.easeOut' } : // Larger particles
+            { start: 0.35, end: 0.03, ease: 'Cubic.easeOut' }; // Larger particles
             
         const speed = isHighSpeedBoost ?
-            { min: 500, max: 700 } : // Faster for high-speed
-            { min: 400, max: 600 };  // Fast linear motion
+            { min: 600, max: 800 } : // Faster for high-speed
+            { min: 500, max: 700 };  // Faster for standard boost
             
-        // DECREASED LIFESPANS for quicker dissipation
+        // INCREASED LIFESPANS for more visible trail
         const lifespan = isHighSpeedBoost ? 
-            600 : // Even shorter lifespan 
-            400;  // Even shorter lifespan
+            800 : // Longer lifespan for high-speed
+            600;  // Longer lifespan for standard
             
         const particleCount = isHighSpeedBoost ?
-            25 : // More particles for high-speed boost
-            18;  // Standard count
+            35 : // More particles for high-speed boost
+            25;  // More particles for standard boost
             
         // IMPROVED TRIANGLES: Create more accurate triangle shape for main burst
         // For horizontal movement, make triangle wider on sides
@@ -213,32 +266,29 @@ export default class ParticleSystem {
         }
         
         // Create a temporary boost emitter with more realistic air burst properties
-        // MAKE EMISSION ZONE WIDER REGARDLESS OF DIRECTION
         const boostEmitter = this.scene.add.particles(0, 0, particleKey, {
             x: player.x + offsetX,
             y: player.y + offsetY,
             lifespan: lifespan,
-            gravityY: -15, // Less gravity for more linear motion
+            gravityY: -25, // More upward drift for better cone shape
             speed: speed,
             scale: scale,
-            alpha: { start: 0.95, end: 0 }, // More visible start
-            // KEY FIX: Always use wider angle spread regardless of direction
-            angle: { min: spreadAngleOffset - 30, max: spreadAngleOffset + 30 },
-            // Strong rotation for turbulence simulation
-            rotate: { start: 0, end: 360, ease: 'Sine.easeInOut' }, 
-            frequency: -1, // Emit all at once (explode mode)
-            // ENHANCED: Triangle-shaped emission zone
+            alpha: { start: 0.95, end: 0 },
+            // WIDER angle spread for cone shape
+            angle: { min: spreadAngleOffset - 45, max: spreadAngleOffset + 45 },
+            rotate: { start: 0, end: 360, ease: 'Sine.easeInOut' },
+            frequency: -1,
             emitZone: { 
                 type: 'random',
                 source: triangleShape
             },
-            // INCREASED spread with higher acceleration
-            accelerationX: { min: -30, max: 30 },
-            accelerationY: { min: -30, max: 30 },
+            // INCREASED spread with higher acceleration for cone shape
+            accelerationX: { min: -50, max: 50 },
+            accelerationY: { min: -50, max: 50 },
             tint: isHighSpeedBoost ? 
-                [ 0xffffff, 0xd8f0ff, 0xccccff, 0x99ffff ] : // More blue/cyan for high speed
-                [ 0xffffff, 0xd8f0ff, 0xccccff ] // Standard tints
-        }).setDepth(30); // Set to same depth as other particle effects
+                [ 0xffffff, 0xd8f0ff, 0xccccff, 0x99ffff ] :
+                [ 0xffffff, 0xd8f0ff, 0xccccff ]
+        }).setDepth(20);
         
         // Emit boost particles
         boostEmitter.explode(particleCount);
@@ -264,33 +314,30 @@ export default class ParticleSystem {
                 );
             }
             
-            // STANDARDIZE THE OFFSET MATH TO BE THE SAME WITH WIDER SPREAD
+            // Secondary emitter parameters
             const secondaryEmitter = this.scene.add.particles(0, 0, particleKey, {
                 x: player.x + (offsetX * 1.3),
                 y: player.y + (offsetY * 1.3),
-                lifespan: lifespan * 0.7, // Shorter lifespan
-                gravityY: -10,
-                speed: { min: speed.min * 0.6, max: speed.max * 0.6 }, // Slower speed
-                scale: { start: 0.2, end: 0.02, ease: 'Cubic.easeOut' }, 
-                alpha: { start: 0.8, end: 0 },
-                // KEY FIX: Always use wider angle spread regardless of direction
-                angle: { min: spreadAngleOffset - 40, max: spreadAngleOffset + 40 },
-                // More extreme rotation for turbulence
+                lifespan: lifespan * 0.8, // Longer secondary burst
+                gravityY: -20, // More upward drift
+                speed: { min: speed.min * 0.7, max: speed.max * 0.7 },
+                scale: { start: 0.3, end: 0.04, ease: 'Cubic.easeOut' }, // Larger particles
+                alpha: { start: 0.9, end: 0 },
+                // WIDER angle spread
+                angle: { min: spreadAngleOffset - 60, max: spreadAngleOffset + 60 },
                 rotate: { min: -180, max: 180, ease: 'Linear.easeIn' },
-                // INCREASED spread with higher acceleration
-                accelerationX: { min: -60, max: 60 },
-                accelerationY: { min: -60, max: 60 },
+                accelerationX: { min: -80, max: 80 }, // More spread
+                accelerationY: { min: -80, max: 80 }, // More spread
                 frequency: -1,
-                // ENHANCED: Use triangle shape for emission
                 emitZone: { 
                     type: 'random',
                     source: secondaryTriangle
                 },
-                tint: [ 0xffffff, 0x99ffff, 0x66ddff ] // Different tint
-            }).setDepth(30);
+                tint: [ 0xffffff, 0x99ffff, 0x66ddff ]
+            }).setDepth(21);
             
-            // Emit more particles for better spread
-            secondaryEmitter.explode(Math.floor(particleCount * 0.8));
+            // Emit more particles
+            secondaryEmitter.explode(Math.floor(particleCount * 0.9));
             
             // Add a third small emission for tiny bubbles with high turbulence and better spread
             const tertiaryEmitter = this.scene.add.particles(0, 0, particleKey, {
@@ -314,7 +361,7 @@ export default class ParticleSystem {
                     source: new Phaser.Geom.Circle(0, 0, 15) // WIDER emission zone for better spread
                 },
                 tint: [ 0xffffff, 0xaaddff, 0x77aaff ] // Lighter tint
-            }).setDepth(29); // Slightly behind main effect
+            }).setDepth(22);
             
             // DRASTICALLY IMPROVE corkscrew visibility - DEDICATED SPIRAL EMITTERS
             
@@ -359,7 +406,7 @@ export default class ParticleSystem {
                     source: new Phaser.Geom.Circle(0, 0, 2) // Very tight emission zone
                 },
                 tint: [ 0xffffff, 0xaaddff, 0x88ccff, 0x66bbff ] // ENHANCED: More varied blues
-            }).setDepth(28);
+            }).setDepth(23); // Now behind player (was 28)
             
             // Create corkscrews that move in proper spiral patterns - BOTTOM PATH
             const bottomCorkscrewEmitter = this.scene.add.particles(0, 0, particleKey, {
@@ -396,7 +443,7 @@ export default class ParticleSystem {
                     source: new Phaser.Geom.Circle(0, 0, 2) // Very tight emission zone
                 },
                 tint: [ 0xffffff, 0xaaddff, 0x88ccff, 0x66bbff ] // ENHANCED: More varied blues
-            }).setDepth(28);
+            }).setDepth(23); // Now behind player (was 28)
             
             // ENHANCED: Added additional middle corkscrew for more density
             const middleCorkscrewEmitter = this.scene.add.particles(0, 0, particleKey, {
@@ -429,7 +476,7 @@ export default class ParticleSystem {
                     source: new Phaser.Geom.Circle(0, 0, 2)
                 },
                 tint: [ 0xffffff, 0x99eeff, 0x77ccff, 0x55aaff ] // Distinct tint for middle path
-            }).setDepth(28);
+            }).setDepth(23); // Now behind player (was 28)
             
             // Create ultra-clear tracer corkscrew - uses exact particle positioning
             const tracerEmitter = this.scene.add.particles(0, 0, particleKey, {
@@ -467,7 +514,7 @@ export default class ParticleSystem {
                     yoyo: false
                 },
                 tint: [ 0xffffff, 0xbbffff, 0x77ddff, 0x55aaff ] // ENHANCED: More varied bright colors
-            }).setDepth(25);
+            }).setDepth(24); // Now behind player (was 25)
             
             // Create a cloud of wider spread particles for visually rich effect
             // IMPROVED TRIANGLES: Better triangle shapes for each direction
@@ -514,7 +561,7 @@ export default class ParticleSystem {
                     source: wideTriangle
                 },
                 tint: [ 0xffffff, 0xeeffff, 0xccffff ]
-            }).setDepth(30);
+            }).setDepth(21); // Now behind player (was 30)
             
             // Create a final ultra-long lasting stream of tiny distant particles
             const distantStreamEmitter = this.scene.add.particles(0, 0, particleKey, {
@@ -636,7 +683,7 @@ export default class ParticleSystem {
             // Create helmet bubbles with simple timing
             const helmetEmitter = this.scene.add.particles(0, 0, particleKey, {
                 follow: player,
-                followOffset: { x: 25, y: -15 }, // Position more in front of face mask
+                followOffset: { x: 10, y: -35 }, // Moved in by 10px more (was 20) and up by 10px more (was -25)
                 lifespan: 2500, // Much longer lifespan to see them float up
                 speed: { min: 25, max: 40 }, // Faster upward movement
                 scale: { start: 0.11, end: 0.05 }, // Same size bubbles with slower shrinking
@@ -666,8 +713,9 @@ export default class ParticleSystem {
                 if (!player.active || !helmetEmitter || !this.enabled) return;
                 
                 // Update position based on player facing
-                const facingOffset = player.flipX ? -25 : 25; // Match the followOffset X value
+                const facingOffset = player.flipX ? -10 : 10; // Moved in by 10px more (was -20/20)
                 helmetEmitter.followOffset.x = facingOffset;
+                helmetEmitter.followOffset.y = -35; // Moved up by 10px more (was -25)
                 
                 // Check if it's time for a burst
                 const elapsed = time - bubbleState.lastBurstTime;

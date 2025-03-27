@@ -1,0 +1,169 @@
+/**
+ * LightingSystem - Creates a flashlight effect using masks and overlays
+ */
+export default class LightingSystem {
+    /**
+     * Create a new LightingSystem
+     * @param {Phaser.Scene} scene - The scene this system belongs to
+     */
+    constructor(scene) {
+        this.scene = scene;
+        this.player = null;
+        this.active = true;
+        
+        // Container for all lighting elements
+        this.container = null;
+        
+        // Dark overlay that covers the game
+        this.darkOverlay = null;
+        
+        // Flashlight cone mask
+        this.flashlightMask = null;
+        
+        // Flashlight properties
+        this.coneLength = 400;    // Length of the cone
+        this.coneAngle = 45;      // Angle of the cone in degrees
+        this.offsetX = 40;        // Horizontal offset from player
+        this.offsetY = 0;         // Vertical offset from player
+        
+        console.log('Simple LightingSystem initialized');
+    }
+    
+    /**
+     * Initialize the lighting system
+     */
+    initialize() {
+        if (this.container) {
+            this.container.destroy();
+        }
+        
+        // Create container for all lighting elements
+        this.container = this.scene.add.container(0, 0);
+        this.container.setDepth(900);
+        
+        // Create dark overlay
+        this.createDarkOverlay();
+        
+        // Create flashlight mask
+        this.createFlashlightMask();
+        
+        // Apply mask to overlay
+        this.darkOverlay.setMask(this.flashlightMask.createGeometryMask());
+        
+        console.log('Lighting system initialized with mask-based flashlight');
+    }
+    
+    /**
+     * Create the dark overlay that covers the game world
+     */
+    createDarkOverlay() {
+        const camera = this.scene.cameras.main;
+        
+        // Create a rectangle that covers the entire game world
+        this.darkOverlay = this.scene.add.rectangle(
+            0, 0,
+            camera.width * 2,
+            camera.height * 2,
+            0x001133,
+            0.7
+        );
+        
+        // Center the overlay and make it follow the camera
+        this.darkOverlay.setScrollFactor(0);
+        this.darkOverlay.setOrigin(0.5);
+        this.darkOverlay.setDepth(800);
+        
+        // Add to container
+        this.container.add(this.darkOverlay);
+    }
+    
+    /**
+     * Create the flashlight cone mask
+     */
+    createFlashlightMask() {
+        // Create a Graphics object for the mask
+        this.flashlightMask = this.scene.add.graphics();
+        this.updateFlashlightMask();
+    }
+    
+    /**
+     * Update the flashlight mask shape and position
+     */
+    updateFlashlightMask() {
+        if (!this.player || !this.flashlightMask) return;
+        
+        // Get player position
+        const playerX = this.player.sprite ? this.player.sprite.x : this.player.x;
+        const playerY = this.player.sprite ? this.player.sprite.y : this.player.y;
+        
+        // Clear previous mask
+        this.flashlightMask.clear();
+        
+        // Set mask style
+        this.flashlightMask.fillStyle(0xffffff);
+        
+        // Calculate direction based on player's facing
+        let facingRight = true;
+        if (this.player.sprite && this.player.sprite.flipX !== undefined) {
+            facingRight = !this.player.sprite.flipX;
+        } else if (this.player.lastDirection !== undefined) {
+            facingRight = this.player.lastDirection === 'right';
+        }
+        
+        // Calculate cone points
+        const angleRad = (this.coneAngle * Math.PI) / 180;
+        const directionX = facingRight ? 1 : -1;
+        
+        // Calculate cone tip position (slightly offset from player)
+        const tipX = playerX + (this.offsetX * directionX);
+        const tipY = playerY + this.offsetY;
+        
+        // Draw the cone
+        this.flashlightMask.beginPath();
+        this.flashlightMask.moveTo(tipX, tipY);
+        
+        // Calculate end points of the cone
+        const endX = tipX + (this.coneLength * directionX);
+        const spreadY = Math.tan(angleRad / 2) * this.coneLength;
+        
+        // Draw cone shape
+        this.flashlightMask.lineTo(endX, tipY - spreadY);
+        this.flashlightMask.lineTo(endX, tipY + spreadY);
+        this.flashlightMask.closePath();
+        
+        // Fill the cone
+        this.flashlightMask.fill();
+        
+        // Add a small circle at the cone tip for better illumination around player
+        this.flashlightMask.fillCircle(tipX, tipY, 30);
+    }
+    
+    /**
+     * Set the player reference
+     * @param {Object} player - The player entity
+     */
+    setPlayer(player) {
+        this.player = player;
+    }
+    
+    /**
+     * Update the lighting system
+     */
+    update() {
+        if (this.active && this.player) {
+            this.updateFlashlightMask();
+        }
+    }
+    
+    /**
+     * Clean up resources
+     */
+    destroy() {
+        if (this.container) {
+            this.container.destroy();
+        }
+        if (this.flashlightMask) {
+            this.flashlightMask.destroy();
+        }
+    }
+} 

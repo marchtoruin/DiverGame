@@ -25,5 +25,13 @@
             "pattern": "^obstacles$",
             "collision": true
         }
+    },
+    "levelSpecific": {
+        "level1": {
+            "background": {
+                "scale": 0.8,
+                "scrollFactor": 0.1
+            }
+        }
     }
 } 

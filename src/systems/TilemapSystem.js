@@ -88,6 +88,11 @@ export default class TilemapSystem {
         try {
             console.log('Starting tilemap creation with key:', key);
             
+            // Set the current level in MapConfigurationSystem
+            if (this.scene.mapConfigSystem) {
+                this.scene.mapConfigSystem.setCurrentLevel(key);
+            }
+            
             // Check if the key is available in the cache
             const cache = this.scene.cache.tilemap;
             

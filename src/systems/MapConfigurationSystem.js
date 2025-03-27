@@ -5,6 +5,7 @@ export default class MapConfigurationSystem {
     constructor(scene) {
         this.scene = scene;
         this.config = null;
+        this.currentLevel = null;
         this.loadConfig();
     }
 
@@ -39,51 +40,66 @@ export default class MapConfigurationSystem {
     }
 
     /**
-     * Configure a layer based on its name
+     * Set the current level being configured
+     * @param {string} levelKey - The level key (e.g., 'level1', 'level2')
+     */
+    setCurrentLevel(levelKey) {
+        this.currentLevel = levelKey;
+        console.log(`Set current level to: ${levelKey}`);
+    }
+
+    /**
+     * Configure a layer based on its name and the current configuration
      * @param {Phaser.Tilemaps.TilemapLayer} layer - The layer to configure
      * @param {string} layerName - The name of the layer
      */
     configureLayer(layer, layerName) {
-        if (!layer) return;
+        if (!layer) {
+            console.error('Cannot configure null layer');
+            return;
+        }
 
-        try {
-            // Convert layer name to lowercase for matching
-            const lowerName = layerName.toLowerCase();
+        const lowerName = layerName.toLowerCase();
+        let config = null;
+
+        // First check for level-specific configuration
+        if (this.currentLevel && 
+            this.config.levelSpecific && 
+            this.config.levelSpecific[this.currentLevel]) {
             
-            // Find matching layer type from config
-            const layerType = Object.entries(this.config.layerTypes).find(([_, config]) => {
-                const pattern = new RegExp(config.pattern || '', 'i');
-                return pattern.test(lowerName);
-            });
-
-            if (layerType) {
-                const [_, settings] = layerType;
-                console.log(`Configuring layer ${layerName} with settings:`, settings);
-
-                // Apply basic properties
-                if (settings.depth !== undefined) layer.setDepth(settings.depth);
-                if (settings.scrollFactor !== undefined) layer.setScrollFactor(settings.scrollFactor);
-                if (settings.scale !== undefined) layer.setScale(settings.scale);
-
-                // Handle collision if specified
-                if (settings.collision) {
-                    layer.setCollisionByExclusion([-1]);
+            // Find matching layer type
+            for (const [type, settings] of Object.entries(this.config.layerTypes)) {
+                if (settings.pattern && new RegExp(settings.pattern).test(lowerName)) {
+                    // Merge level-specific settings with default settings
+                    const levelSpecific = this.config.levelSpecific[this.currentLevel][type];
+                    if (levelSpecific) {
+                        config = { ...settings, ...levelSpecific };
+                        console.log(`Applied level-specific config for ${layerName} in ${this.currentLevel}`);
+                        break;
+                    }
                 }
-
-                // Ensure visibility
-                layer.setVisible(true);
-                layer.setAlpha(1);
-            } else {
-                // Default configuration if no match found
-                console.log(`No specific configuration found for layer ${layerName}, using defaults`);
-                layer.setDepth(25)
-                    .setScrollFactor(1.0)
-                    .setScale(1.0)
-                    .setVisible(true)
-                    .setAlpha(1);
             }
-        } catch (error) {
-            console.error(`Error configuring layer ${layerName}:`, error);
+        }
+
+        // If no level-specific config found, use default
+        if (!config) {
+            for (const [type, settings] of Object.entries(this.config.layerTypes)) {
+                if (settings.pattern && new RegExp(settings.pattern).test(lowerName)) {
+                    config = settings;
+                    break;
+                }
+            }
+        }
+
+        // Apply configuration if found
+        if (config) {
+            console.log(`Configuring layer ${layerName} with:`, config);
+            if (typeof config.depth === 'number') layer.setDepth(config.depth);
+            if (typeof config.scrollFactor === 'number') layer.setScrollFactor(config.scrollFactor);
+            if (typeof config.scale === 'number') layer.setScale(config.scale);
+            if (config.collision) layer.setCollisionByExclusion([-1]);
+        } else {
+            console.warn(`No configuration found for layer: ${layerName}`);
         }
     }
 } 

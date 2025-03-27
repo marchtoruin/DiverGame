@@ -19,7 +19,7 @@
     "phaser": "^3.60.0"
   },
   "devDependencies": {
-    "@parcel/config-default": "^2.14.1",
+    "@parcel/config-default": "2.14.1",
     "@parcel/core": "2.14.1",
     "@parcel/optimizer-cssnano": "2.14.1",
     "@parcel/optimizer-htmlnano": "2.14.1",
@@ -36,7 +36,7 @@
     "@parcel/transformer-js": "2.14.1",
     "@parcel/transformer-raw": "2.14.1",
     "gh-pages": "^5.0.0",
-    "parcel": "^2.14.1",
+    "parcel": "2.14.1",
     "process": "^0.11.10",
     "rimraf": "^6.0.1"
   }

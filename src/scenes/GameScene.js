@@ -16,6 +16,7 @@ import {
 // Import asset paths
 import level1Data from '../assets/maps/level1.json';
 import level2Data from '../assets/maps/level2.json';
+import mapConfig from '../config/mapConfig.json';
 import underwaterBg from '../assets/underwater_bg.png';
 import blackAndBlueImg from '../assets/black_and_blue.png';  
 import rock2Img from '../assets/rock2.png';
@@ -35,6 +36,7 @@ import ambienceMusic from '../assets/music/ambience_underwater.wav';
 import heartImg from '../assets/heart.png';
 import badFishImg from '../assets/enemies/badFish01.png';
 import seaweedImg from '../assets/seaweed.png'; // Add seaweed tileset
+import flashlightCone1Img from '../assets/flashlight_cone1.png'; // Import custom flashlight mask
 
 // Import systems
 import AnimationSystem from '../systems/AnimationSystem';
@@ -59,6 +61,8 @@ import UIManagementSystem from '../systems/UIManagementSystem';
 import TouchControlSystem from '../systems/TouchControlSystem';
 import { GameSceneUI } from './components/GameSceneUI';
 import { GameSceneCamera } from './components/GameSceneCamera';
+import BackgroundSystem from '../systems/BackgroundSystem';
+import LightingSystem from '../systems/LightingSystem';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -92,6 +96,8 @@ export default class GameScene extends Phaser.Scene {
         this.touchControlSystem = null;
         this.gameSceneUI = null;
         this.gameSceneCamera = null;
+        this.backgroundSystem = null;
+        this.lightingSystem = null;
         
         // Game state
         this.oxygenLevel = 100;
@@ -125,8 +131,8 @@ export default class GameScene extends Phaser.Scene {
             // Initialize asset management system
             this.assetSystem = new AssetManagementSystem(this);
             
-            // Load map configuration
-            this.load.json('mapConfig', 'src/config/mapConfig.json');
+            // Add map configuration to cache
+            this.cache.json.add('mapConfig', mapConfig);
             
             // Load map and tilesets
             this.load.tilemapTiledJSON('level1', level1Data);
@@ -156,6 +162,9 @@ export default class GameScene extends Phaser.Scene {
             // Load bullet sprite
             this.load.image('bullet', bulletImg);
             
+            // Load custom flashlight mask image
+            this.load.image('flashlight_cone1', flashlightCone1Img);
+            
             // Load audio
             this.load.audio('music', bgMusic);
             this.load.audio('ambience', ambienceMusic);
@@ -174,50 +183,28 @@ export default class GameScene extends Phaser.Scene {
         this.gameRunning = true;
         
         try {
-            // Initialize camera system first
-            this.gameSceneCamera = new GameSceneCamera(this);
+            // Initialize background system first
+            this.backgroundSystem = new BackgroundSystem(this);
+            this.backgroundSystem.createFullScreenBackground();
             
-            // Create full-screen background
-            this.createFullScreenBackground();
-            
-            // Setup core systems
-            this.audioSystem = new AudioSystem(this);
-            this.particleSystem = new ParticleSystem(this);
-            this.mapConfigSystem = new MapConfigurationSystem(this);
-            this.entityLayerSystem = new EntityLayerSystem(this);
-            this.tilemapSystem = new TilemapSystem(this);
-            this.ambientBubbleSystem = new AmbientBubbleSystem(this);
-            this.bulletSystem = new BulletSystem(this);
-            
-            // Initialize audio system
-            if (this.audioSystem) {
-                this.audioSystem.setupMusic('music', 'ambience');
-            }
+            // Initialize all systems
+            this.setupSystems();
             
             // Create the map
             this.createTiledMap();
             
-            // Now create player
-            this.playerSystem = new PlayerSystem(this);
+            // Setup player after map creation
             this.setupPlayer();
             
-            // Complete remaining setup
-            this.airPocketSystem = new AirPocketSystem(this, this.player);
-            this.airPocketSystem.setDebugVisualsEnabled(true);
+            // Setup controls
             this.setupControls();
             
-            // Initialize camera after player and map are set up
+            // Initialize camera and UI after everything is set up
             this.gameSceneCamera.initialize();
-            
-            // Initialize UI systems
-            this.gameSceneUI = new GameSceneUI(this);
             this.gameSceneUI.initialize();
             
-            // Setup collisions
+            // Setup collisions last
             this.setupCollisions();
-            
-            // Initialize enemy system
-            this.enemySystem = new EnemySystem(this);
             
             // Set up collision between player and enemies
             this.physics.add.overlap(
@@ -242,232 +229,124 @@ export default class GameScene extends Phaser.Scene {
             
             // Handle window resize
             this.scale.on('resize', () => {
+                this.backgroundSystem?.handleResize();
                 this.uiSystem?.handleResize();
+                this.lightingSystem?.handleResize();
+            });
+            
+            // Add flashlight key binding
+            this.input.keyboard.on('keydown-F', () => {
+                if (this.lightingSystem) {
+                    // Toggle flashlight with the custom mask
+                    this.lightingSystem.toggleFlashlight('flashlight_cone1');
+                }
             });
             
             console.log('GameScene initialization complete');
         } catch (error) {
-            console.error('Error in create method:', error);
-        }
-    }
-    
-    createFullScreenBackground() {
-        try {
-            // Create a background that covers the entire screen regardless of camera position
-            // Using the camera's viewport dimensions ensures it fills the entire screen
-            const width = this.cameras.main.width;
-            const height = this.cameras.main.height;
-            
-            // Create a very large rectangle that will stay fixed to the camera
-            // This ensures no black areas are visible at the edges
-            this.fullScreenBg = this.add.rectangle(
-                -width, -height, 
-                width * 4, height * 4, 
-                0x000033 // Darker blue background
-            );
-            this.fullScreenBg.setScrollFactor(0); // Fixed to camera
-            this.fullScreenBg.setDepth(-50);
-            this.fullScreenBg.setOrigin(0, 0);
-            
-            // Add a gradient overlay for depth effect - using darker colors
-            const gradientTexture = this.createGradientTexture(width, height, ['#000022', '#000033', '#000044']);
-            if (gradientTexture) {
-                this.gradientOverlay = this.add.image(0, 0, 'gradient-texture');
-                this.gradientOverlay.setScrollFactor(0);
-                this.gradientOverlay.setDepth(-45);
-                this.gradientOverlay.setOrigin(0, 0);
-                this.gradientOverlay.setDisplaySize(width * 2, height * 2);
-            }
-            
-            // Create a more densely-packed water pattern overlay for visual interest
-            // But with darker, more subtle colors
-            for (let i = 0; i < 30; i++) { // Reduced from 50
-                const x = Phaser.Math.Between(-width/2, width * 1.5);
-                const y = Phaser.Math.Between(-height/2, height * 1.5);
-                const size = Phaser.Math.Between(50, 300);
-                const alpha = Phaser.Math.FloatBetween(0.03, 0.1); // Lower alpha
-                
-                const waterEffect = this.add.circle(x, y, size, 0x000066, alpha); // Darker blue
-                waterEffect.setScrollFactor(Phaser.Math.FloatBetween(0.05, 0.3)); // Varied parallax
-                waterEffect.setDepth(-40);
-                
-                // Add subtle animation to water effects
-                this.tweens.add({
-                    targets: waterEffect,
-                    alpha: '-=0.02', // Smaller alpha change
-                    scale: '+=0.2',  // Smaller scale change
-                    duration: Phaser.Math.Between(5000, 10000), // Slower
-                    ease: 'Sine.easeInOut',
-                    yoyo: true,
-                    repeat: -1
-                });
-            }
-            
-            // Add some larger circular shapes for additional underwater effect
-            for (let i = 0; i < 7; i++) { // Reduced from 10
-                const x = Phaser.Math.Between(-width/2, width * 1.5);
-                const y = Phaser.Math.Between(-height/2, height * 1.5);
-                const size = Phaser.Math.Between(200, 500);
-                const alpha = Phaser.Math.FloatBetween(0.02, 0.05); // Lower alpha
-                
-                const deepWaterEffect = this.add.circle(x, y, size, 0x000055, alpha); // Darker blue
-                deepWaterEffect.setScrollFactor(Phaser.Math.FloatBetween(0.1, 0.2));
-                deepWaterEffect.setDepth(-42);
-                
-                // Add subtle pulsing animation
-                this.tweens.add({
-                    targets: deepWaterEffect,
-                    alpha: '-=0.01', // Smaller alpha change
-                    scale: '+=0.15', // Smaller scale change
-                    duration: Phaser.Math.Between(8000, 15000), // Slower
-                    ease: 'Sine.easeInOut',
-                    yoyo: true,
-                    repeat: -1
-                });
-            }
-            
-            // Create animated water overlay for underwater movement effect without tile movement
-            this.createWaterMovementOverlay();
-            
-            console.log('Created dark full-screen background that stays fixed to camera');
-        } catch (error) {
-            console.error('Error creating full-screen background:', error);
-        }
-    }
-    
-    createWaterMovementOverlay() {
-        try {
-            const width = this.cameras.main.width;
-            const height = this.cameras.main.height;
-            
-            // Create container for water overlay effects
-            this.waterOverlayContainer = this.add.container(0, 0);
-            this.waterOverlayContainer.setDepth(20); // Above most things but below player
-            this.waterOverlayContainer.setScrollFactor(0); // Fixed to camera
-            
-            // Add subtle caustic light effects (light shimmering through water)
-            // But make them much more subtle and darker
-            for (let i = 0; i < 5; i++) { // Reduced from 8 to 5
-                const x = Phaser.Math.Between(0, width);
-                const y = Phaser.Math.Between(0, height);
-                const size = Phaser.Math.Between(100, 350);
-                
-                // Create a light patch with much lower opacity
-                const causticLight = this.add.graphics();
-                causticLight.fillStyle(0x001133, 0.01); // Darker blue, very transparent
-                causticLight.fillCircle(0, 0, size);
-                
-                const causticSprite = this.add.renderTexture(x, y, size*2, size*2);
-                causticSprite.draw(causticLight, size, size);
-                causticLight.destroy();
-                
-                this.waterOverlayContainer.add(causticSprite);
-                
-                // Animate the caustic light effect with less visibility
-                this.tweens.add({
-                    targets: causticSprite,
-                    alpha: { from: 0.01, to: 0.05 }, // Much lower opacity
-                    scale: { from: 0.8, to: 1.2 },
-                    duration: Phaser.Math.Between(4000, 8000),
-                    ease: 'Sine.easeInOut',
-                    yoyo: true,
-                    repeat: -1,
-                    delay: Phaser.Math.Between(0, 2000)
-                });
-                
-                // Also move them slightly
-                this.tweens.add({
-                    targets: causticSprite,
-                    x: '+=30',
-                    y: '+=20',
-                    duration: Phaser.Math.Between(6000, 10000),
-                    ease: 'Sine.easeInOut',
-                    yoyo: true,
-                    repeat: -1,
-                    delay: Phaser.Math.Between(0, 3000)
-                });
-            }
-            
-            // Remove the blue haze overlay completely
-            // This was causing the lightening of the background
-            
-            console.log('Created subtle water movement overlay without blue tint');
-        } catch (error) {
-            console.error('Error creating water movement overlay:', error);
-        }
-    }
-    
-    // Helper method to create a gradient texture
-    createGradientTexture(width, height, colorStops) {
-        try {
-            // Create a canvas for the gradient
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            
-            // Create gradient
-            const gradient = ctx.createLinearGradient(0, 0, 0, height);
-            
-            // Add color stops
-            colorStops.forEach((color, index) => {
-                gradient.addColorStop(index / (colorStops.length - 1), color);
-            });
-            
-            // Fill with gradient
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, width, height);
-            
-            // Create texture from canvas
-            this.textures.addCanvas('gradient-texture', canvas);
-            
-            console.log('Created gradient texture for background');
-            return true;
-        } catch (error) {
-            console.error('Error creating gradient texture:', error);
-            return false;
+            console.error('Error in create:', error);
         }
     }
     
     setupSystems() {
         try {
-            // This method is now called from within create
-            // to allow proper sequencing of initialization
+            // Initialize camera system first
+            this.gameSceneCamera = new GameSceneCamera(this);
+            
+            // Setup core systems
+            this.audioSystem = new AudioSystem(this);
+            this.particleSystem = new ParticleSystem(this);
+            this.mapConfigSystem = new MapConfigurationSystem(this);
+            this.entityLayerSystem = new EntityLayerSystem(this);
+            this.tilemapSystem = new TilemapSystem(this);
+            this.ambientBubbleSystem = new AmbientBubbleSystem(this);
+            this.bulletSystem = new BulletSystem(this);
+            
+            // Initialize audio system
+            if (this.audioSystem) {
+                this.audioSystem.setupMusic('music', 'ambience');
+            }
+            
+            // Initialize player system
+            this.playerSystem = new PlayerSystem(this);
+            
+            // Initialize air pocket system after player
+            this.airPocketSystem = new AirPocketSystem(this, this.player);
+            this.airPocketSystem.setDebugVisualsEnabled(true);
+            
+            // Initialize enemy system
+            this.enemySystem = new EnemySystem(this);
+            
+            // Initialize lighting system
+            this.lightingSystem = new LightingSystem(this);
+            
+            // Set the custom flashlight mask
+            this.lightingSystem.setCustomFlashlightMask('flashlight_cone1');
+            
+            // Initialize UI
+            this.gameSceneUI = new GameSceneUI(this);
+            
+            // Make sure the bullet system has proper references
+            this.bulletSystem.init();
+            
+            console.log('All systems initialized successfully');
         } catch (error) {
-            console.error('Error initializing systems:', error);
+            console.error('Error in setupSystems:', error);
         }
     }
 
     setupAnimations() {
         try {
             console.log('Setting up animations...');
-            if (this.animationSystem) {
-                // First remove any existing animations to prevent conflicts
-                if (this.anims.exists(ANIMATIONS.IDLE_SWIM.KEY)) {
-                    this.anims.remove(ANIMATIONS.IDLE_SWIM.KEY);
-                    console.log('Removed existing idle_swim animation');
-                }
-                
-                // Create a new animation
-                const success = this.animationSystem.createPlayerSwimAnimation('idle_swim_full');
-                
-                // Verify the animation was created
-                if (this.anims.exists(ANIMATIONS.IDLE_SWIM.KEY)) {
-                    console.log('Animation created successfully, verified it exists!');
-                } else {
-                    console.error('Animation creation failed - not found after creation attempt');
-                    // Try one more time with the animation system's master method
-                    this.animationSystem.createAnimations();
-                }
-                
-                // Do final check after all attempts
-                const animExists = this.anims.exists(ANIMATIONS.IDLE_SWIM.KEY);
-                console.log('Final animation status:', animExists ? 'SUCCESS' : 'FAILED');
-            } else {
-                console.warn('Animation system not initialized');
+            
+            if (!this.animationSystem) {
+                console.warn('Animation system not initialized, skipping animation setup');
+                return;
             }
+
+            // Track which animations we need to create
+            const requiredAnimations = [
+                { key: ANIMATIONS.IDLE_SWIM.KEY, status: false }
+            ];
+            
+            // First remove any existing animations to prevent conflicts
+            requiredAnimations.forEach(({ key }) => {
+                if (this.anims.exists(key)) {
+                    console.log(`Removing existing animation: ${key}`);
+                    this.anims.remove(key);
+                }
+            });
+            
+            // Create animations using both methods for redundancy
+            requiredAnimations.forEach(animation => {
+                try {
+                    // Try specific animation creation first
+                    const success = this.animationSystem.createPlayerSwimAnimation('idle_swim_full');
+                    animation.status = this.anims.exists(animation.key);
+                    
+                    // If specific creation failed, try master method
+                    if (!animation.status) {
+                        console.log(`Specific animation creation failed for ${animation.key}, trying master method...`);
+                        this.animationSystem.createAnimations();
+                        animation.status = this.anims.exists(animation.key);
+                    }
+                    
+                    console.log(`Animation ${animation.key} creation ${animation.status ? 'succeeded' : 'failed'}`);
+                } catch (err) {
+                    console.error(`Error creating animation ${animation.key}:`, err);
+                }
+            });
+            
+            // Final verification
+            const missingAnimations = requiredAnimations.filter(a => !a.status).map(a => a.key);
+            if (missingAnimations.length > 0) {
+                console.error('Failed to create animations:', missingAnimations);
+            } else {
+                console.log('All animations created successfully');
+            }
+            
         } catch (error) {
-            console.error('Error setting up animations:', error);
+            console.error('Error in setupAnimations:', error);
         }
     }
 
@@ -662,6 +541,35 @@ export default class GameScene extends Phaser.Scene {
             } else {
                 console.error('No tilesets were added to the map');
             }
+
+            // After map is created and all the setup has been done:
+            if (this.lightingSystem) {
+                console.log('Initializing lighting system with map');
+                
+                // Create a lighting overlay sized to the camera
+                this.lightingSystem.createOverlay();
+                
+                // Process Lighting layer from the Tiled map
+                this.lightingSystem.processLightingZones(map);
+                
+                // Process Light objects from the Tiled map (for point lights)
+                this.lightingSystem.processLightObjects(map);
+                
+                // Give the lighting system access to the map
+                this.map = map;
+                
+                // Enable lighting system debug
+                if (this.physics.config.debug) {
+                    console.log('Lighting zones created:', this.lightingSystem.lightingZones.length);
+                    
+                    // Display any active lighting zones
+                    if (this.lightingSystem.lightingZones.length > 0) {
+                        this.lightingSystem.lightingZones.forEach((zone, index) => {
+                            console.log(`Zone ${index}: ${zone.type} at (${zone.x}, ${zone.y}), size: ${zone.width}x${zone.height}`);
+                        });
+                    }
+                }
+            }
         } catch (error) {
             console.error('Error in createTiledMap:', error);
             this.createFallbackMap();
@@ -792,7 +700,18 @@ export default class GameScene extends Phaser.Scene {
                     
                     // Listen for player boost events to create particles
                     this.player.on('boostBurst', (sprite, direction) => {
-                        this.createBoostParticles(sprite, direction);
+                        // Use particle system directly
+                        if (this.particleSystem) {
+                            this.particleSystem.emitBoostBurst(sprite, 'bubble', direction);
+                        }
+                        
+                        // Keep camera shake in GameScene
+                        if (this.gameSceneCamera) {
+                            this.gameSceneCamera.shake(
+                                CAMERA.SHAKE.DURATION,
+                                CAMERA.SHAKE.INTENSITY
+                            );
+                        }
                     });
                     
                     // Listen for camera shake events
@@ -801,6 +720,12 @@ export default class GameScene extends Phaser.Scene {
                             this.gameSceneCamera.shake(duration, intensity);
                         }
                     });
+                    
+                    // Connect to lighting system
+                    if (this.lightingSystem) {
+                        console.log('Connecting player to lighting system');
+                        this.lightingSystem.setPlayer(this.player);
+                    }
                     
                     console.log('Player setup complete');
                 } else {
@@ -811,35 +736,6 @@ export default class GameScene extends Phaser.Scene {
             }
         } catch (error) {
             console.error('Error in setupPlayer:', error);
-        }
-    }
-
-    createBoostParticles(player, direction, isHighSpeedBoost = false) {
-        try {
-            if (!player || !this.particleSystem) {
-                console.warn('Cannot create boost particles: player or particleSystem not available');
-                return;
-            }
-            
-            console.log('Creating boost particles:', { direction, isHighSpeedBoost });
-            
-            // Use particle system to create boost effects
-            this.particleSystem.emitBoostBurst(player, 'bubble', direction, isHighSpeedBoost);
-            
-            // Add camera shake when boosting
-            if (this.gameSceneCamera) {
-                const intensity = isHighSpeedBoost ? 
-                    CAMERA.SHAKE.INTENSITY * 1.5 : 
-                    CAMERA.SHAKE.INTENSITY;
-                
-                const duration = isHighSpeedBoost ? 
-                    CAMERA.SHAKE.DURATION * 1.2 : 
-                    CAMERA.SHAKE.DURATION;
-                    
-                this.gameSceneCamera.shake(duration, intensity);
-            }
-        } catch (error) {
-            console.error('Error creating boost particles:', error);
         }
     }
 
@@ -855,14 +751,21 @@ export default class GameScene extends Phaser.Scene {
     setupKeyboardControls() {
         this.cursors = this.input.keyboard.createCursorKeys();
         
+        // Initialize both arrow and WASD controls in a single object
         this.keys = {
             up: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
             down: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
             left: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
             right: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
-            boost: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+            boost: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+            // Add arrow keys as alternative controls
+            upArrow: this.cursors.up,
+            downArrow: this.cursors.down,
+            leftArrow: this.cursors.left,
+            rightArrow: this.cursors.right
         };
         
+        // For backward compatibility
         this.wasdKeys = this.keys;
     }
 
@@ -934,113 +837,285 @@ export default class GameScene extends Phaser.Scene {
     update(time, delta) {
         if (!this.gameRunning) return;
         
+        // Update player and oxygen first since they're critical
         if (this.player) {
             this.player.update(time, delta);
-            if (this.oxygenMeter?.updateOxygen) {
-                this.oxygenMeter.updateOxygen(this.player.oxygen, this.player.maxOxygen);
+            // Only update oxygen if meter exists and has update method
+            this.oxygenMeter?.updateOxygen?.(this.player.oxygen, this.player.maxOxygen);
+        }
+        
+        // Update core gameplay systems
+        this.gameSceneCamera?.update?.(time, delta);
+        this.airPocketSystem?.update?.(time, delta);
+        this.collisionSystem?.update?.(time, delta);
+        
+        // Update visual and effect systems
+        this.ambientBubbleSystem?.update?.(time, delta);
+        this.bulletSystem?.update?.(time, delta);
+        
+        // Update UI and input systems
+        this.healthSystem?.update?.(time, delta);
+        this.uiSystem?.update?.(time, delta);
+        this.touchControlSystem?.update?.(time, delta);
+        this.gameSceneUI?.update?.(time, delta);
+
+        // Update enemy system last to ensure all other systems are updated first
+        this.enemySystem?.update?.(time, delta);
+
+        // Update touch input state
+        this.touchData = this.touchControlSystem?.getInputState() || this.touchData;
+
+        // Get the player's current direction based on keyboard input
+        let playerRotation = null;
+        
+        if (this.cursors) {
+            if (this.cursors.left.isDown) {
+                playerRotation = Math.PI; // Left = 180 degrees
+            } else if (this.cursors.right.isDown) {
+                playerRotation = 0; // Right = 0 degrees
+            } else if (this.cursors.up.isDown) {
+                playerRotation = -Math.PI/2; // Up = -90 degrees
+            } else if (this.cursors.down.isDown) {
+                playerRotation = Math.PI/2; // Down = 90 degrees
+            }
+            
+            // Handle diagonals
+            if (this.cursors.up.isDown && this.cursors.right.isDown) {
+                playerRotation = -Math.PI/4; // Up-Right = -45 degrees
+            } else if (this.cursors.up.isDown && this.cursors.left.isDown) {
+                playerRotation = -3*Math.PI/4; // Up-Left = -135 degrees
+            } else if (this.cursors.down.isDown && this.cursors.right.isDown) {
+                playerRotation = Math.PI/4; // Down-Right = 45 degrees
+            } else if (this.cursors.down.isDown && this.cursors.left.isDown) {
+                playerRotation = 3*Math.PI/4; // Down-Left = 135 degrees
             }
         }
         
-        // Update systems
-        [
-            this.oxygenMeter,
-            this.gameSceneCamera,
-            this.airPocketSystem,
-            this.collisionSystem,
-            this.ambientBubbleSystem,
-            this.bulletSystem,
-            this.healthSystem,
-            this.uiSystem,
-            this.touchControlSystem,
-            this.gameSceneUI
-        ].forEach(system => {
-            if (system?.update) system.update(time, delta);
-        });
-
-        // Update enemy system
-        if (this.enemySystem) {
-            this.enemySystem.update(time, delta);
+        // Only update the player's rotation if we have a valid direction
+        if (playerRotation !== null) {
+            // Store the rotation on the player object
+            this.player.rotation = playerRotation;
         }
-
-        // Get touch input state
-        this.touchData = this.touchControlSystem?.getInputState() || this.touchData;
+        
+        // Check if player's sprite flipX needs to be updated based on movement
+        if (this.player && this.player.sprite) {
+            // If player is moving left
+            if (this.cursors.left.isDown || this.keys.left.isDown) {
+                // If player wasn't already facing left
+                if (!this.player.sprite.flipX) {
+                    // Update the player sprite and flashlight immediately
+                    this.player.sprite.flipX = true;
+                    
+                    // Update flashlight rotation if enabled
+                    if (this.lightingSystem && this.lightingSystem.flashlightEnabled) {
+                        this.lightingSystem.flashlightRotation = Math.PI; // left
+                        this.lightingSystem.updateFlashlightCone();
+                    }
+                }
+            }
+            // If player is moving right
+            else if (this.cursors.right.isDown || this.keys.right.isDown) {
+                // If player wasn't already facing right
+                if (this.player.sprite.flipX) {
+                    // Update the player sprite and flashlight immediately
+                    this.player.sprite.flipX = false;
+                    
+                    // Update flashlight rotation if enabled
+                    if (this.lightingSystem && this.lightingSystem.flashlightEnabled) {
+                        this.lightingSystem.flashlightRotation = 0; // right
+                        this.lightingSystem.updateFlashlightCone();
+                    }
+                }
+            }
+        }
+        
+        // Update the lighting system
+        if (this.lightingSystem) {
+            this.lightingSystem.update(delta);
+        }
     }
 
     cleanup() {
-        this.events.off('resize');
-        this.events.off('playerOxygenChanged');
-        
-        [
-            this.tilemapSystem,
-            this.airPocketSystem,
-            this.playerSystem,
-            this.player,
-            this.oxygenMeter,
-            this.healthSystem,
-            this.gameSceneCamera
-        ].forEach(system => {
-            if (system?.destroy) system.destroy();
-        });
-        
-        this.tilemapSystem = null;
-        this.airPocketSystem = null;
-        this.playerSystem = null;
-        this.player = null;
-        this.oxygenMeter = null;
-        this.healthSystem = null;
-        this.gameSceneCamera = null;
+        try {
+            console.log('Starting GameScene cleanup...');
+            
+            // Remove event listeners first
+            this.events.off('resize');
+            this.events.off('playerOxygenChanged');
+            
+            // Define all systems that need cleanup
+            const systemsToCleanup = [
+                { system: this.backgroundSystem, name: 'BackgroundSystem' },
+                { system: this.tilemapSystem, name: 'TilemapSystem' },
+                { system: this.airPocketSystem, name: 'AirPocketSystem' },
+                { system: this.playerSystem, name: 'PlayerSystem' },
+                { system: this.player, name: 'Player' },
+                { system: this.oxygenMeter, name: 'OxygenMeter' },
+                { system: this.healthSystem, name: 'HealthSystem' },
+                { system: this.gameSceneCamera, name: 'GameSceneCamera' }
+            ];
+            
+            // Clean up each system
+            systemsToCleanup.forEach(({ system, name }) => {
+                try {
+                    if (system?.destroy) {
+                        system.destroy();
+                        console.log(`Cleaned up ${name}`);
+                    }
+                } catch (err) {
+                    console.warn(`Error cleaning up ${name}:`, err);
+                }
+            });
+            
+            // Null out references
+            this.tilemapSystem = null;
+            this.airPocketSystem = null;
+            this.playerSystem = null;
+            this.player = null;
+            this.oxygenMeter = null;
+            this.healthSystem = null;
+            this.gameSceneCamera = null;
+            
+            console.log('GameScene cleanup completed');
+        } catch (error) {
+            console.error('Error in cleanup:', error);
+        }
     }
 
     shutdown() {
-        console.log('GameScene shutting down');
-        
-        // Clean up physics
-        if (this.physics.world.colliders) {
-            this.physics.world.colliders.destroy();
-        }
-        
-        // Clean up systems
-        [
-            this.ambientBubbleSystem,
-            this.uiSystem,
-            this.touchControlSystem,
-            this.gameSceneUI
-        ].forEach(system => {
-            if (system?.destroy) {
-                system.destroy();
-                system = null;
+        try {
+            console.log('GameScene shutting down...');
+            
+            // Clean up physics first
+            if (this.physics.world.colliders) {
+                this.physics.world.colliders.destroy();
+                console.log('Physics colliders cleaned up');
             }
-        });
-        
-        // Clean up other resources
-        this.gameRunning = false;
-        
-        // Call super.shutdown after cleanup
-        super.shutdown();
+            
+            // Define remaining systems to clean up
+            const remainingSystems = [
+                { system: this.ambientBubbleSystem, name: 'AmbientBubbleSystem' },
+                { system: this.uiSystem, name: 'UISystem' },
+                { system: this.touchControlSystem, name: 'TouchControlSystem' },
+                { system: this.gameSceneUI, name: 'GameSceneUI' },
+                { system: this.particleSystem, name: 'ParticleSystem' },
+                { system: this.enemySystem, name: 'EnemySystem' },
+                { system: this.bulletSystem, name: 'BulletSystem' },
+                { system: this.audioSystem, name: 'AudioSystem' }
+            ];
+            
+            // Clean up remaining systems
+            remainingSystems.forEach(({ system, name }) => {
+                try {
+                    if (system?.destroy) {
+                        system.destroy();
+                        console.log(`Cleaned up ${name}`);
+                    }
+                } catch (err) {
+                    console.warn(`Error cleaning up ${name}:`, err);
+                }
+            });
+            
+            // Stop all game loops and timers
+            this.gameRunning = false;
+            
+            // Clear any remaining tweens
+            this.tweens.killAll();
+            
+            // Clear any remaining timers
+            this.time.removeAllEvents();
+            
+            // Call parent class shutdown
+            super.shutdown();
+            
+            console.log('GameScene shutdown completed');
+        } catch (error) {
+            console.error('Error in shutdown:', error);
+            // Still try to call parent shutdown even if we had errors
+            super.shutdown();
+        }
     }
     
     pause() {
-        console.log('GameScene paused');
-        
-        // Pause ambient bubbles
-        if (this.ambientBubbleSystem) {
-            this.ambientBubbleSystem.pause();
+        try {
+            console.log('GameScene pausing...');
+            
+            // Set game state first
+            this.gameRunning = false;
+            
+            // Pause all active systems
+            const systemsToPause = [
+                { system: this.ambientBubbleSystem, name: 'AmbientBubbleSystem' },
+                { system: this.particleSystem, name: 'ParticleSystem' },
+                { system: this.enemySystem, name: 'EnemySystem' },
+                { system: this.bulletSystem, name: 'BulletSystem' },
+                { system: this.audioSystem, name: 'AudioSystem' }
+            ];
+            
+            systemsToPause.forEach(({ system, name }) => {
+                try {
+                    if (system?.pause) {
+                        system.pause();
+                        console.log(`Paused ${name}`);
+                    }
+                } catch (err) {
+                    console.warn(`Error pausing ${name}:`, err);
+                }
+            });
+            
+            // Pause any active tweens
+            this.tweens.pauseAll();
+            
+            // Call parent pause last
+            super.pause();
+            
+            console.log('GameScene paused successfully');
+        } catch (error) {
+            console.error('Error in pause:', error);
+            // Ensure game state is set even if error occurs
+            this.gameRunning = false;
         }
-        
-        this.gameRunning = false;
-        super.pause();
     }
     
     resume() {
-        console.log('GameScene resumed');
-        
-        // Resume ambient bubbles
-        if (this.ambientBubbleSystem) {
-            this.ambientBubbleSystem.resume();
+        try {
+            console.log('GameScene resuming...');
+            
+            // Resume all active systems
+            const systemsToResume = [
+                { system: this.ambientBubbleSystem, name: 'AmbientBubbleSystem' },
+                { system: this.particleSystem, name: 'ParticleSystem' },
+                { system: this.enemySystem, name: 'EnemySystem' },
+                { system: this.bulletSystem, name: 'BulletSystem' },
+                { system: this.audioSystem, name: 'AudioSystem' }
+            ];
+            
+            systemsToResume.forEach(({ system, name }) => {
+                try {
+                    if (system?.resume) {
+                        system.resume();
+                        console.log(`Resumed ${name}`);
+                    }
+                } catch (err) {
+                    console.warn(`Error resuming ${name}:`, err);
+                }
+            });
+            
+            // Resume any paused tweens
+            this.tweens.resumeAll();
+            
+            // Set game state
+            this.gameRunning = true;
+            
+            // Call parent resume last
+            super.resume();
+            
+            console.log('GameScene resumed successfully');
+        } catch (error) {
+            console.error('Error in resume:', error);
+            // Ensure game state is set even if error occurs
+            this.gameRunning = true;
         }
-        
-        this.gameRunning = true;
-        super.resume();
     }
 
     getInputState() {
@@ -1115,111 +1190,14 @@ export default class GameScene extends Phaser.Scene {
 
     adjustBackgroundLayers() {
         try {
-            console.log('Adjusting background layers...');
+            // Let the background system handle all layer adjustments
+            this.backgroundSystem?.adjustLayers(this.tilemapSystem);
             
-            // Get the world dimensions
-            const worldBounds = this.tilemapSystem?.map ? {
-                width: this.tilemapSystem.map.widthInPixels,
-                height: this.tilemapSystem.map.heightInPixels
-            } : {
-                width: this.physics.world.bounds.width,
-                height: this.physics.world.bounds.height
-            };
-            
-            // Get camera dimensions 
-            const cameraWidth = this.cameras.main.width;
-            const cameraHeight = this.cameras.main.height;
-            
-            // Create a solid background color first to ensure no black areas
-            if (!this.backgroundRect) {
-                // Create a massive background rectangle that completely fills the view
-                this.backgroundRect = this.add.rectangle(
-                    -cameraWidth, -cameraHeight, 
-                    worldBounds.width + (cameraWidth * 3), 
-                    worldBounds.height + (cameraHeight * 3),
-                    0x000044 // Darker blue for the base background
-                );
-                this.backgroundRect.setOrigin(0, 0);
-                this.backgroundRect.setDepth(-10);
-                this.backgroundRect.setScrollFactor(0.05); // Very slow parallax effect
-                console.log('Added massive background rectangle with darker color');
-            }
-            
-            // Configure tilemap layers if available
-            if (this.tilemapSystem?.layers) {
-                console.log('Found tilemap layers to adjust:', Object.keys(this.tilemapSystem.layers));
-                
-                Object.entries(this.tilemapSystem.layers).forEach(([name, layer]) => {
-                    if (!layer) {
-                        console.warn(`Layer ${name} is null or undefined`);
-                        return;
-                    }
-                    
-                    // Make sure all layers are visible
-                    layer.setVisible(true);
-                    
-                    // Configure layers based on their exact name, not just substring matching
-                    if (name === 'Background') {
-                        console.log(`Adjusting main background layer: ${name}`);
-                        // Fix grid-line shimmering by:
-                        // 1. Using a fixed scroll factor (0.0)
-                        // 2. Removing screen blend mode to preserve dark colors
-                        // 3. Making it fully opaque to show original colors
-                        
-                        // Clear any existing tweens on this layer
-                        this.tweens.killTweensOf(layer);
-                        
-                        layer.setDepth(0)
-                            .setScrollFactor(0.0) // Completely fixed to eliminate shimmering
-                            .setScale(4.0) // Large scale but no animation
-                            .setPosition(-cameraWidth, -cameraHeight) // Position far off-screen
-                            .setAlpha(1.0) // Fully opaque to show original dark colors
-                            .setBlendMode(Phaser.BlendModes.NORMAL); // Normal blend mode to preserve colors
-                        
-                    } else if (name === 'Background_sprites') {
-                        console.log(`Adjusting background sprites layer: ${name}`);
-                        layer.setDepth(1)
-                            .setScrollFactor(0.3) // Slight parallax
-                            .setScale(1.0) // Normal scale
-                            .setAlpha(1.0); // Fully opaque
-                    } else if (name === 'Midground_sprites') {
-                        console.log(`Adjusting midground layer: ${name}`);
-                        layer.setDepth(5)
-                            .setScrollFactor(0.7) // Medium parallax
-                            .setScale(1.0) // Normal scale
-                            .setAlpha(1.0);
-                    } else if (name === 'Obstacles') {
-                        console.log('Adjusting Obstacles layer in GameScene');
-                        layer.setDepth(40)  // Standardized to 40 to match TilemapSystem
-                            .setScrollFactor(1.0)
-                            .setScale(1.0)
-                            .setAlpha(1.0);
-                        console.log('Obstacles layer adjusted:', {
-                            depth: layer.depth,
-                            visible: layer.visible,
-                            alpha: layer.alpha,
-                            scrollFactor: layer.scrollFactorX
-                        });
-                    } else {
-                        console.log(`Adjusting default layer: ${name}`);
-                        layer.setDepth(1)
-                            .setScrollFactor(1.0)
-                            .setScale(1.0)
-                            .setAlpha(1.0);
-                    }
-                });
-                
-                console.log('Background layers adjusted successfully');
-            } else {
-                console.warn('No tilemap layers available to adjust');
-            }
-            
-            // Make sure player is visible and on top with normal scale
+            // Ensure player is visible and on top
             if (this.player?.sprite) {
                 this.player.sprite.setVisible(true)
                     .setDepth(25)
-                    .setScale(1.0); // Ensure player maintains normal scale
-                console.log('Player depth set to 25');
+                    .setScale(1.0);
             }
         } catch (error) {
             console.error('Error adjusting background layers:', error);

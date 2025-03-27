@@ -1,13 +1,15 @@
 {
   "extends": "@parcel/config-default",
   "transformers": {
-    "*.{png,jpg,jpeg,gif,mp3,wav}": ["@parcel/transformer-raw"]
+    "*.{png,jpg,jpeg,gif,mp3,wav}": ["@parcel/transformer-raw"],
+    "*.json": ["@parcel/transformer-raw"]
   },
   "resolvers": ["@parcel/resolver-default"],
   "packagers": {
     "*.html": "@parcel/packager-html",
     "*.js": "@parcel/packager-js",
-    "*.css": "@parcel/packager-css"
+    "*.css": "@parcel/packager-css",
+    "*.json": "@parcel/packager-raw"
   },
   "optimizers": {
     "*.js": ["@parcel/optimizer-terser"],

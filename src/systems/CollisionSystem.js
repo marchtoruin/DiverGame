@@ -122,6 +122,131 @@ export default class CollisionSystem {
         // Set up world bounds collision
         playerSprite.setCollideWorldBounds(true);
         console.log('Player collision with world bounds enabled');
+        
+        // Enable Continuous Collision Detection for the player to prevent tunneling at high speeds
+        if (playerSprite.body) {
+            // Store the original player body size and offset
+            this.originalBodySize = {
+                width: playerSprite.body.width,
+                height: playerSprite.body.height,
+                offsetX: playerSprite.body.offset.x,
+                offsetY: playerSprite.body.offset.y
+            };
+            
+            // Set up a check function to run every frame
+            this.scene.events.on('update', this.checkHighSpeedCollision, this);
+            
+            console.log('High-speed collision detection enabled for player');
+        }
+    }
+    
+    /**
+     * Check for high-speed collisions to prevent tunneling through obstacles
+     * @param {number} time - Current game time
+     * @param {number} delta - Time since last update
+     */
+    checkHighSpeedCollision(time, delta) {
+        const player = this.scene.player;
+        if (!player || !player.sprite || !player.sprite.body) return;
+        
+        const playerBody = player.sprite.body;
+        
+        // Get player velocity
+        const velocityX = playerBody.velocity.x;
+        const velocityY = playerBody.velocity.y;
+        
+        // Calculate velocity magnitude
+        const velocityMagnitude = Math.sqrt(velocityX * velocityX + velocityY * velocityY);
+        
+        // Only apply special handling for high velocities (like during boost)
+        const isHighSpeed = velocityMagnitude > 300;
+        
+        if (isHighSpeed) {
+            // Calculate movement direction
+            const dirX = velocityX !== 0 ? Math.sign(velocityX) : 0;
+            const dirY = velocityY !== 0 ? Math.sign(velocityY) : 0;
+            
+            // Temporarily increase the player's collision body size in the direction of movement
+            // This effectively creates a "sweep test" that prevents tunneling
+            const extraSize = 10; // Extra collision padding
+            
+            // Adjust body size based on movement direction
+            if (Math.abs(velocityX) > Math.abs(velocityY)) {
+                // Moving mostly horizontally
+                const extraWidth = Math.floor(Math.abs(velocityX) / 60); // Scale with velocity
+                playerBody.setSize(
+                    this.originalBodySize.width + extraSize + extraWidth,
+                    this.originalBodySize.height,
+                    false
+                );
+                
+                // Adjust offset based on direction to keep the player sprite centered
+                if (dirX > 0) {
+                    // Moving right
+                    playerBody.setOffset(
+                        this.originalBodySize.offsetX - extraSize/2,
+                        this.originalBodySize.offsetY
+                    );
+                } else {
+                    // Moving left
+                    playerBody.setOffset(
+                        this.originalBodySize.offsetX - extraSize/2 - extraWidth,
+                        this.originalBodySize.offsetY
+                    );
+                }
+            } else {
+                // Moving mostly vertically
+                const extraHeight = Math.floor(Math.abs(velocityY) / 60); // Scale with velocity
+                playerBody.setSize(
+                    this.originalBodySize.width,
+                    this.originalBodySize.height + extraSize + extraHeight,
+                    false
+                );
+                
+                // Adjust offset based on direction to keep the player sprite centered
+                if (dirY > 0) {
+                    // Moving down
+                    playerBody.setOffset(
+                        this.originalBodySize.offsetX,
+                        this.originalBodySize.offsetY - extraSize/2
+                    );
+                } else {
+                    // Moving up
+                    playerBody.setOffset(
+                        this.originalBodySize.offsetX,
+                        this.originalBodySize.offsetY - extraSize/2 - extraHeight
+                    );
+                }
+            }
+            
+            // Debug visualization
+            if (this.scene.physics.config.debug && !this.debugText) {
+                this.debugText = this.scene.add.text(10, 40, 
+                    `High-speed collision: ${velocityMagnitude.toFixed(0)}`, 
+                    { font: '12px Arial', fill: '#ff0000' }
+                ).setDepth(1000).setScrollFactor(0);
+            } else if (this.scene.physics.config.debug && this.debugText) {
+                this.debugText.setText(`High-speed collision: ${velocityMagnitude.toFixed(0)}`);
+            }
+        } else {
+            // Restore original collision body size and offset when moving at normal speed
+            if (this.originalBodySize) {
+                playerBody.setSize(
+                    this.originalBodySize.width,
+                    this.originalBodySize.height,
+                    false
+                );
+                playerBody.setOffset(
+                    this.originalBodySize.offsetX,
+                    this.originalBodySize.offsetY
+                );
+            }
+            
+            // Hide debug text when back to normal speed
+            if (this.debugText) {
+                this.debugText.setText('');
+            }
+        }
     }
     
     /**
@@ -211,21 +336,29 @@ export default class CollisionSystem {
      * Clean up resources when the system is destroyed
      */
     destroy() {
+        // Remove the update event listener
+        this.scene.events.off('update', this.checkHighSpeedCollision, this);
+        
+        // Clean up debug text
+        if (this.debugText) {
+            this.debugText.destroy();
+            this.debugText = null;
+        }
+        
         // Remove all colliders
-        this.colliders.forEach(colliderObj => {
-            if (colliderObj.collider && colliderObj.collider.destroy) {
-                colliderObj.collider.destroy();
+        this.colliders.forEach(({ collider }) => {
+            if (collider && typeof collider.destroy === 'function') {
+                collider.destroy();
             }
         });
+        this.colliders = [];
         
         // Remove all overlaps
-        this.overlaps.forEach(overlapObj => {
-            if (overlapObj.overlap && overlapObj.overlap.destroy) {
-                overlapObj.overlap.destroy();
+        this.overlaps.forEach(({ overlap }) => {
+            if (overlap && typeof overlap.destroy === 'function') {
+                overlap.destroy();
             }
         });
-        
-        this.colliders = [];
         this.overlaps = [];
         
         console.log('CollisionSystem destroyed');

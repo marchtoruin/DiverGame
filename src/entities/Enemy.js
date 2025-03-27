@@ -59,17 +59,19 @@ export default class Enemy extends Phaser.GameObjects.Sprite {
             0x000000,
             0.5
         );
+        this.healthBarBg.setOrigin(0.5, 0.5);
         this.healthBarBg.setDepth(21); // Above enemy
 
         // Create health bar fill
         this.healthBarFill = this.scene.add.rectangle(
-            this.x,
+            this.x - this.width/2, // Anchor to left side
             this.y - this.height/2 - 10,
             this.width,
             4,
             0x00ff00,
             1
         );
+        this.healthBarFill.setOrigin(0, 0.5); // Set origin to left-center
         this.healthBarFill.setDepth(22); // Above background
 
         // Create health text
@@ -92,7 +94,7 @@ export default class Enemy extends Phaser.GameObjects.Sprite {
         
         // Update health bar fill width
         const healthPercent = this.health / this.maxHealth;
-        this.healthBarFill.width = this.width * healthPercent;
+        const newWidth = this.width * healthPercent;
         
         // Update health text
         this.healthText.setText(`${this.health}/${this.maxHealth}`);
@@ -101,9 +103,17 @@ export default class Enemy extends Phaser.GameObjects.Sprite {
         const color = healthPercent > 0.6 ? 0x00ff00 : healthPercent > 0.3 ? 0xffff00 : 0xff0000;
         this.healthBarFill.setFillStyle(color);
         
-        // Update positions to follow enemy
+        // Position the background bar (centered)
         this.healthBarBg.setPosition(this.x, this.y - this.height/2 - 10);
-        this.healthBarFill.setPosition(this.x - (this.width * (1 - healthPercent))/2, this.y - this.height/2 - 10);
+        
+        // Position the fill bar (anchored to left)
+        this.healthBarFill.setPosition(
+            this.x - this.width/2, // Start from left edge of background
+            this.y - this.height/2 - 10
+        );
+        this.healthBarFill.width = newWidth;
+        
+        // Position the text (centered)
         this.healthText.setPosition(this.x, this.y - this.height/2 - 20);
     }
     
