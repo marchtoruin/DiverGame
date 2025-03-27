@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "node",
+      "args": ["mcp-server-github/index.js"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "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",
+        "GITHUB_OWNER": "marchtoruin",
+        "GITHUB_REPO": "DiverGame",
+        "GITHUB_BRANCH": "backup/pre-deployment"
+      }
+    }
+  }
+} 
