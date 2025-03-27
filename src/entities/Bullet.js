@@ -1,4 +1,6 @@
 // src/entities/Bullet.js
+import { LIGHTING } from '../utils/Constants';
+
 export default class Bullet extends Phaser.Physics.Arcade.Sprite {
     constructor(scene, x, y) {
         super(scene, x, y, 'bullet');
@@ -6,11 +8,16 @@ export default class Bullet extends Phaser.Physics.Arcade.Sprite {
         scene.physics.add.existing(this);
         
         // Initialize properties
-        this.speed = 1440; // Increased speed for faster projectiles
+        this.speed = 800;
+        this.lifespan = 1000; // in milliseconds
+        this.damage = 5;
         this.setActive(false);
         this.setVisible(false);
-        this.setScale(0.6);
-        this.setDepth(12);
+        this.setScale(0.5);
+        
+        // IMPORTANT: Set depth higher than the darkness overlay (which is at 900)
+        // This makes bullets appear on top of the darkness
+        this.setDepth(950);
         
         // Ensure independent physics
         this.body.setAllowGravity(false);
@@ -21,87 +28,87 @@ export default class Bullet extends Phaser.Physics.Arcade.Sprite {
         // Set a proper hitbox size
         this.body.setSize(this.width * 0.7, this.height * 0.7);
         
-        // Add a simple glow effect
-        this.glow = scene.add.sprite(x, y, 'bullet')
-            .setScale(0.8)
-            .setAlpha(0.3)
+        // Add a glow effect
+        this.createGlowEffect();
+    }
+  
+    createGlowEffect() {
+        // Create glow sprite that follows the bullet
+        this.glow = this.scene.add.sprite(this.x, this.y, 'bullet')
             .setBlendMode(Phaser.BlendModes.ADD)
-            .setDepth(11)
-            .setVisible(false);
+            .setAlpha(0.6)
+            .setScale(1.2)
+            .setTint(0xffff99) // Yellowish tint for better visibility
+            .setVisible(false)
+            // IMPORTANT: Set glow depth just below bullet but above darkness
+            .setDepth(949);
+            
+        // Slight pulse animation for the glow
+        this.scene.tweens.add({
+            targets: this.glow,
+            alpha: { from: 0.4, to: 0.8 },
+            scale: { from: 1.0, to: 1.5 },
+            duration: 500,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
     }
   
     fire(x, y, direction) {
-        // Reset bullet state and position
+        // Reset bullet position
+        this.body.reset(x, y);
+        
+        // Activate bullet and set velocity
         this.setActive(true);
         this.setVisible(true);
         
-        // Important: Reset the body AND position
-        this.body.reset(x, y);
-        this.body.setVelocity(this.speed * direction, 0);
+        // Show glow effect
+        if (this.glow) {
+            this.glow.setVisible(true);
+            this.glow.setPosition(this.x, this.y);
+        }
         
-        // Ensure no interference from physics
-        this.body.setAllowGravity(false);
-        this.body.setDrag(0);
-        this.body.setFriction(0);
+        // Apply velocity based on direction
+        const speed = direction > 0 ? this.speed : -this.speed;
+        this.setVelocityX(speed);
+        this.setVelocityY(0);
         
-        // Show and position glow effect
-        this.glow.setVisible(true);
-        this.glow.setPosition(x, y);
+        // Reset lifespan timer
+        this.lifespan = 1000; // reset to full lifespan
         
-        // Rotate bullet based on direction
-        this.rotation = direction > 0 ? 0 : Math.PI;
-        this.glow.rotation = this.rotation;
-        
-        // Add a quick flash effect
-        const flash = this.scene.add.sprite(x, y, 'bullet')
-            .setScale(1)
-            .setAlpha(0.8)
-            .setBlendMode(Phaser.BlendModes.ADD)
-            .setDepth(13);
-        flash.rotation = this.rotation;
-        
-        this.scene.tweens.add({
-            targets: flash,
-            alpha: 0,
-            scale: 1.5,
-            duration: 100,
-            onComplete: () => flash.destroy()
-        });
-        
-        // Emit a small burst using the particle system if available
+        // Add particle trail if it exists
         if (this.scene.particleSystem) {
-            const particleDirection = { x: direction, y: 0 };
-            this.scene.particleSystem.emitMovementBurst(this, 'bubble', particleDirection);
+            this.scene.particleSystem.addBulletTrail?.(this);
         }
     }
   
-    update() {
-        if (this.active) {
-            // Update glow position
-            if (this.glow && this.glow.visible) {
-                this.glow.setPosition(this.x, this.y);
-            }
-            
-            // Check if bullet is out of bounds relative to the camera
-            const camera = this.scene.cameras.main;
-            const margin = 100; // Larger margin to ensure bullets don't disappear too early
-            
-            // Convert world position to screen position
-            const screenX = this.x - camera.scrollX;
-            
-            // Check if bullet is far outside the camera view
-            if (screenX < -margin || screenX > camera.width + margin) {
-                this.deactivate();
-            }
+    update(time, delta) {
+        // Decrease lifespan
+        this.lifespan -= delta;
+        
+        // Check if bullet has expired
+        if (this.lifespan <= 0) {
+            this.deactivate();
+            return;
+        }
+        
+        // Update glow position
+        if (this.glow && this.glow.visible) {
+            this.glow.setPosition(this.x, this.y);
         }
     }
     
     deactivate() {
+        // Deactivate the bullet
         this.setActive(false);
         this.setVisible(false);
-        this.glow.setVisible(false);
-        // Ensure velocity is zeroed when deactivated
-        this.body.setVelocity(0, 0);
+        this.body.stop();
+        
+        // Hide glow effect
+        if (this.glow) {
+            this.glow.setVisible(false);
+        }
     }
     
     destroy() {
