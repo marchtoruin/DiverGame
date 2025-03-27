@@ -123,6 +123,11 @@ export default class AmbientBubbleSystem {
             .setAlpha(0.5)
             .setDepth(this.depth)
             .setRotation(Math.random() * Math.PI * 2);
+            
+        // Add blur effect to the bubble
+        if (this.scene.postFX) {
+            bubble.postFX.addBlur(1, 2, 2, 1, 0xffffff, 4);
+        }
 
         // Add movement properties
         bubble.moveData = {
@@ -206,6 +211,11 @@ export default class AmbientBubbleSystem {
         // Randomize initial rotation
         bubble.setRotation(Math.random() * Math.PI * 2);
         
+        // Add blur effect to the bubble
+        if (this.scene.postFX) {
+            bubble.postFX.addBlur(1, 2, 2, 1, 0xffffff, 4);
+        }
+        
         // Determine bubble size and properties
         const sizeRoll = Math.random();
         let baseScale, scaleVariation, deformSpeed, speed, drift;
@@ -255,4 +265,4 @@ export default class AmbientBubbleSystem {
         // Set depth
         bubble.setDepth(this.depth);
     }
-} 
+}
