@@ -1,41 +1,43 @@
-# Underwater Diver Game
+# DiverGame
 
-A Phaser 3 game where you control a diver exploring an underwater world, collecting air pockets while avoiding obstacles.
+Phaser 3 game where you control a diver exploring an underwater world, collecting air pockets while avoiding obstacles.
 
 ## Features
 
 - Smooth diver movement with momentum-based physics
-- Parallax scrolling background for depth effect
-- Collectible air pockets that float upward
-- Large rock obstacles to navigate around
-- Oxygen management system
-- Background music with volume controls
-- Particle effects for bubbles and air pockets
+- Parallax scrolling background with multiple layers
+- Collectible air pockets to maintain oxygen
+- Oxygen management system with visual indicator
+- Flashlight system for dark areas
+- Bullet system with enhanced visibility in darkness
+- Ambient bubble effects
+- Touch controls for mobile gameplay
+- Enemies and combat system
+- Improved lighting and darkness detection
+
+## Development Status
+
+Currently in pre-production, implementing enhanced gameplay features.
 
 ## Controls
 
-- WASD or Arrow Keys to move the diver
-- Music controls in top-right corner (volume up/down and mute)
-
-## Development
-
-Built with:
-- Phaser 3
-- JavaScript
-- HTML5
+- WASD or Arrow Keys: Move the diver
+- Space: Boost
+- F: Toggle flashlight
+- Left Mouse: Fire weapon
 
 ## Setup
 
 1. Clone the repository
-2. Install dependencies: `npm install`
-3. Run the development server: `npm start`
+2. Run `npm install` to install dependencies
+3. Run `npm start` for development mode
+4. Run `npm run build` for production build
 
 ## Assets
 
-The game includes:
 - Multiple background layers for parallax effect
-- Diver sprite
-- Rock obstacles
-- Air pocket collectibles
-- Bubble particles
-- Background music 
+- Diver sprite with animations
+- Air bubble collectibles
+- Ambient bubble particles
+- Enemy sprites
+- Weapon system
