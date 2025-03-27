@@ -123,6 +123,12 @@ export default class AmbientBubbleSystem {
             .setAlpha(0.5)
             .setDepth(this.depth)
             .setRotation(Math.random() * Math.PI * 2);
+            
+        // Add blur effect to the bubble
+        // Quality: 1 (Medium), Horizontal: 2, Vertical: 2, Strength: 1, Color: white, Steps: 4
+        if (bubble.postFX) {
+            bubble.postFX.addBlur(1, 2, 2, .35, 0xffffff, 4);
+        }
 
         // Add movement properties
         bubble.moveData = {
@@ -202,6 +208,12 @@ export default class AmbientBubbleSystem {
         
         // Create bubble sprite
         const bubble = this.scene.add.sprite(x, y, randomBubbleKey);
+        
+        // Add blur effect to the bubble
+        // Quality: 1 (Medium), Horizontal: 2, Vertical: 2, Strength: 1, Color: white, Steps: 4
+        if (bubble.postFX) {
+            bubble.postFX.addBlur(1, 2, 2, 1, 0xffffff, 4);
+        }
         
         // Randomize initial rotation
         bubble.setRotation(Math.random() * Math.PI * 2);
