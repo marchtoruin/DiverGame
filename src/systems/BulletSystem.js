@@ -26,8 +26,21 @@ export default class BulletSystem {
         // Oxygen cost per shot
         this.oxygenCostPerShot = 0.7; // Reduced from 2 to make shooting more sustainable
         
+        // Reference to the lighting system (will be set in init)
+        this.lightingSystem = null;
+        
         // Set up input handling
         this.setupInput();
+    }
+    
+    /**
+     * Initialize system with references to other systems
+     */
+    init() {
+        // Get reference to the lighting system if it exists
+        if (this.scene.lightingSystem) {
+            this.lightingSystem = this.scene.lightingSystem;
+        }
     }
     
     setupInput() {
@@ -44,7 +57,7 @@ export default class BulletSystem {
             }
         });
     }
-    
+
     /**
      * Update bullet system
      * @param {number} time - Current game time
@@ -68,15 +81,47 @@ export default class BulletSystem {
     
     /**
      * Fire a bullet from the player
-     * @param {number} x - X position of the bullet
-     * @param {number} y - Y position of the bullet
+     * @param {number} x - X position of the player
+     * @param {number} y - Y position of the player
      * @param {number} direction - Direction of the bullet
      */
     fireBullet(x, y, direction) {
+        // Check if player has enough oxygen to fire
+        if (this.scene.player && this.scene.player.oxygen < this.oxygenCostPerShot) {
+            return; // Can't fire if not enough oxygen
+        }
+
+        // Use manually tuned offsets based on the player sprite
+        let bulletX = x;
+        let bulletY = y;
+        
+        // Different offsets based on player direction
+        if (direction > 0) { // Facing right
+            bulletX = x + 50; // Moved out by 12px (was +38)
+            bulletY = y - 40; // Moved up by 2px (was -38)
+        } else { // Facing left
+            bulletX = x - 50; // Moved out by 12px (was -38)
+            bulletY = y - 40; // Moved up by 2px (was -38)
+        }
+        
         let bullet = this.bullets.getFirstDead(true);
         
         if (bullet) {
-            bullet.fire(x, y, direction);
+            bullet.fire(bulletX, bulletY, direction);
+            
+            // The depth is now set in the Bullet class constructor
+            // to be higher than the darkness overlay (950)
+            
+            // Add a subtle camera shake effect when firing
+            if (this.scene.cameras && this.scene.cameras.main) {
+                this.scene.cameras.main.shake(50, 0.003, false); // Duration 50ms, intensity 0.003 (very subtle)
+            }
+            
+            // Consume oxygen for firing
+            if (this.scene.player) {
+                this.scene.player.oxygen = Math.max(0, this.scene.player.oxygen - this.oxygenCostPerShot);
+                this.scene.events.emit('playerOxygenChanged', this.scene.player.oxygen, this.scene.player.maxOxygen);
+            }
         }
     }
     
@@ -125,4 +170,4 @@ export default class BulletSystem {
         }
         this.bullets.clear(true, true);
     }
-} 
+}
