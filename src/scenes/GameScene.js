@@ -63,6 +63,7 @@ import { GameSceneUI } from './components/GameSceneUI';
 import { GameSceneCamera } from './components/GameSceneCamera';
 import BackgroundSystem from '../systems/BackgroundSystem';
 import LightingSystem from '../systems/LightingSystem';
+import GameStateManager from '../systems/GameStateManager';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -234,6 +235,25 @@ export default class GameScene extends Phaser.Scene {
                 );
             }
             
+            // Handle game over conditions
+            this.events.on('playerOxygenDepleted', () => {
+                if (this.gameStateManager) {
+                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER);
+                }
+            });
+            
+            this.events.on('playerDeath', () => {
+                if (this.gameStateManager) {
+                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER);
+                }
+            });
+            
+            this.events.on('gameOver', () => {
+                if (this.gameStateManager) {
+                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER);
+                }
+            });
+            
             // Handle window resize
             this.scale.on('resize', () => {
                 this.backgroundSystem?.handleResize();
@@ -270,6 +290,9 @@ export default class GameScene extends Phaser.Scene {
             this.tilemapSystem = new TilemapSystem(this);
             this.ambientBubbleSystem = new AmbientBubbleSystem(this);
             this.bulletSystem = new BulletSystem(this);
+            
+            // Initialize game state manager
+            this.gameStateManager = new GameStateManager(this);
             
             // Initialize audio system
             if (this.audioSystem) {
@@ -795,10 +818,8 @@ export default class GameScene extends Phaser.Scene {
 
             // Setup obstacle collisions if tilemap system exists
             if (this.tilemapSystem) {
-                // Find the obstacles layer
-                const obstaclesLayer = Object.values(this.tilemapSystem.layers || {}).find(layer => 
-                    layer.layer?.name?.toLowerCase().includes('obstacle')
-                );
+                // Get the obstacles layer directly from the tilemap
+                const obstaclesLayer = this.tilemapSystem.map.getLayer('Obstacles').tilemapLayer;
                 
                 if (obstaclesLayer && this.player?.sprite) {
                     // Enable collisions on the obstacles layer
@@ -807,6 +828,20 @@ export default class GameScene extends Phaser.Scene {
                     // Add collider between player and obstacles
                     this.physics.add.collider(this.player.sprite, obstaclesLayer);
                     console.log('Player-obstacle collisions set up');
+                    
+                    // Add bullet-wall collisions
+                    if (this.bulletSystem) {
+                        this.physics.add.collider(
+                            this.bulletSystem.bullets,
+                            obstaclesLayer,
+                            (bullet) => {
+                                if (bullet.active) {
+                                    bullet.deactivate();
+                                }
+                            }
+                        );
+                        console.log('Bullet-obstacle collisions set up');
+                    }
                 }
             }
             

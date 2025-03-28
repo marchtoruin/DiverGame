@@ -265,8 +265,111 @@ export default class GameStateManager {
      * @param {Object} data - Game over data
      */
     showGameOverScreen(data) {
-        // Implementation of game over screen
-        console.log('Showing game over screen');
+        // Create container for game over screen elements if it doesn't exist
+        if (!this.gameOverMenu) {
+            // Create container at screen center
+            this.gameOverMenu = this.scene.add.container(0, 0);
+            this.gameOverMenu.setDepth(1000);
+            
+            // Background darkening - make it cover the entire camera view
+            const bg = this.scene.add.rectangle(
+                0, 0,
+                this.scene.scale.width,
+                this.scene.scale.height,
+                0x000000, 0.8
+            );
+            bg.setOrigin(0, 0); // Set origin to top-left
+            bg.setScrollFactor(0); // Fix to camera
+            
+            // Game Over text - centered on screen
+            const gameOverText = this.scene.add.text(
+                this.scene.scale.width / 2,
+                this.scene.scale.height / 2 - 100,
+                'GAME OVER',
+                { 
+                    fontFamily: 'Arial', 
+                    fontSize: '64px', 
+                    color: '#ffffff',
+                    fontWeight: 'bold',
+                    stroke: '#000000',
+                    strokeThickness: 6
+                }
+            ).setOrigin(0.5);
+            gameOverText.setScrollFactor(0); // Fix to camera
+            
+            // Restart button - centered below text
+            const restartButton = this.scene.add.rectangle(
+                this.scene.scale.width / 2,
+                this.scene.scale.height / 2 + 50,
+                200, 50, 
+                0x6666ff
+            ).setInteractive({ useHandCursor: true });
+            restartButton.setScrollFactor(0); // Fix to camera
+            
+            const restartText = this.scene.add.text(
+                this.scene.scale.width / 2,
+                this.scene.scale.height / 2 + 50,
+                'Restart',
+                { 
+                    fontFamily: 'Arial', 
+                    fontSize: '32px', 
+                    color: '#ffffff',
+                    fontWeight: 'bold'
+                }
+            ).setOrigin(0.5);
+            restartText.setScrollFactor(0); // Fix to camera
+            
+            // Add button behavior
+            restartButton.on('pointerover', () => {
+                restartButton.setFillStyle(0x8888ff);
+            });
+            
+            restartButton.on('pointerout', () => {
+                restartButton.setFillStyle(0x6666ff);
+            });
+            
+            restartButton.on('pointerdown', () => {
+                restartButton.setFillStyle(0x4444ff);
+            });
+            
+            restartButton.on('pointerup', () => {
+                // Hide the menu first
+                this.gameOverMenu.setVisible(false);
+                
+                // Clean up all systems before restart
+                this.cleanupForRestart();
+                
+                // Reset the game state
+                this.scene.scene.restart();
+            });
+            
+            // Add elements to container
+            this.gameOverMenu.add([bg, gameOverText, restartButton, restartText]);
+            
+            // Handle window resize
+            this.scene.scale.on('resize', () => {
+                if (this.gameOverMenu && this.gameOverMenu.visible) {
+                    // Update background size
+                    bg.setSize(this.scene.scale.width, this.scene.scale.height);
+                    
+                    // Update positions of elements
+                    gameOverText.setPosition(this.scene.scale.width / 2, this.scene.scale.height / 2 - 100);
+                    restartButton.setPosition(this.scene.scale.width / 2, this.scene.scale.height / 2 + 50);
+                    restartText.setPosition(this.scene.scale.width / 2, this.scene.scale.height / 2 + 50);
+                }
+            });
+        }
+        
+        // Show the menu
+        this.gameOverMenu.setVisible(true);
+        
+        // Pause the game physics
+        this.scene.physics.pause();
+        
+        // Make sure the game over screen is on top
+        this.gameOverMenu.setDepth(1000);
+        
+        console.log('Game over screen displayed');
     }
     
     /**
@@ -351,6 +454,86 @@ export default class GameStateManager {
             case this.gameStates.LEVEL_COMPLETE:
                 // Level complete state
                 break;
+        }
+    }
+    
+    /**
+     * Clean up all systems before restart
+     */
+    cleanupForRestart() {
+        try {
+            // Clean up game over menu
+            if (this.gameOverMenu) {
+                this.gameOverMenu.removeAll(true);
+                this.gameOverMenu.destroy();
+                this.gameOverMenu = null;
+            }
+            
+            // Clean up pause menu
+            if (this.pauseMenu) {
+                this.pauseMenu.removeAll(true);
+                this.pauseMenu.destroy();
+                this.pauseMenu = null;
+            }
+            
+            // Clean up event listeners
+            this.scene.scale.off('resize');
+            this.scene.input.keyboard.off('keydown-ESC');
+            
+            // Clear state listeners
+            this.stateChangeListeners.clear();
+            
+            // Clean up scene systems
+            if (this.scene.player) {
+                if (this.scene.player.sprite) {
+                    this.scene.player.sprite.destroy();
+                }
+                this.scene.player = null;
+            }
+            
+            // Clean up other major systems
+            const systemsToCleanup = [
+                'lightingSystem',
+                'audioSystem',
+                'particleSystem',
+                'tilemapSystem',
+                'airPocketSystem',
+                'oxygenMeter',
+                'playerSystem',
+                'collisionSystem',
+                'ambientBubbleSystem',
+                'bulletSystem',
+                'healthSystem',
+                'enemySystem',
+                'uiSystem',
+                'gameSceneUI',
+                'gameSceneCamera'
+            ];
+            
+            systemsToCleanup.forEach(systemKey => {
+                if (this.scene[systemKey] && typeof this.scene[systemKey].destroy === 'function') {
+                    try {
+                        this.scene[systemKey].destroy();
+                        this.scene[systemKey] = null;
+                    } catch (e) {
+                        console.warn(`Error cleaning up ${systemKey}:`, e);
+                    }
+                }
+            });
+            
+            // Stop all running tweens
+            this.scene.tweens.killAll();
+            
+            // Stop all running timers
+            this.scene.time.removeAllEvents();
+            
+            // Clear any remaining physics bodies
+            this.scene.physics.world.colliders.clear();
+            this.scene.physics.world.bodies.clear();
+            
+            console.log('Cleanup completed successfully');
+        } catch (error) {
+            console.error('Error during cleanup:', error);
         }
     }
     

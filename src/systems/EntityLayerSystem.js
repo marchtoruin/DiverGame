@@ -27,6 +27,9 @@ export default class EntityLayerSystem {
             }
         });
         
+        // Track processed air pocket positions to prevent duplicates
+        const processedPositions = new Set();
+        
         // AirPocket processor - fixing to work with the correct key and variation
         this.registerEntityProcessor('airpocket', (obj, layer) => {
             // Skip if missing coordinates
@@ -35,10 +38,25 @@ export default class EntityLayerSystem {
                 return;
             }
             
+            // Create a unique position key
+            const posKey = `${Math.round(obj.x)},${Math.round(obj.y)}`;
+            
+            // Skip if this position has already been processed
+            if (processedPositions.has(posKey)) {
+                console.log(`Skipping duplicate air pocket at ${posKey}`);
+                return;
+            }
+            
+            // Skip if this is an enemy spawn point
+            if (obj.name?.toLowerCase().includes('type') || obj.type?.toLowerCase().includes('type')) {
+                console.log(`Skipping enemy spawn point at ${posKey}`);
+                return;
+            }
+            
             // Extract properties
             let variation = 1;  // Default to variation 1
             let oxygen = 50;    // Default oxygen amount
-            let respawn = 30;   // Default respawn time (seconds)
+            let respawn = 30;
             
             // Handle properties in array format
             if (obj.properties && Array.isArray(obj.properties)) {
@@ -71,26 +89,13 @@ export default class EntityLayerSystem {
             // Validate variation (1-3)
             variation = Math.max(1, Math.min(3, variation));
             
-            // Create the AirPocket spawn points collection if it doesn't exist
+            // Create the AirPockets spawn points collection if it doesn't exist
             // Use correct casing to match Tiled layer name 'AirPockets'
             if (!this.spawnPoints.has('AirPockets')) {
                 this.spawnPoints.set('AirPockets', []);
             }
             
-            // Check for duplicates before adding
-            const posKey = `${Math.round(obj.x)},${Math.round(obj.y)}`;
-            const existingSpawnPoints = this.spawnPoints.get('AirPockets');
-            const isDuplicate = existingSpawnPoints.some(sp => {
-                const spPosKey = `${Math.round(sp.x)},${Math.round(sp.y)}`;
-                return spPosKey === posKey;
-            });
-            
-            if (isDuplicate) {
-                console.warn(`Skipping duplicate AirPocket at ${posKey}`);
-                return;
-            }
-            
-            // Add a single spawn point with the correct properties
+            // Add the spawn point
             console.log(`Adding AirPocket at (${obj.x}, ${obj.y}) with variation=${variation}`);
             this.spawnPoints.get('AirPockets').push({
                 x: obj.x,
@@ -101,6 +106,9 @@ export default class EntityLayerSystem {
                 oxygen: oxygen,
                 respawn: respawn
             });
+            
+            // Mark this position as processed
+            processedPositions.add(posKey);
         });
     }
 

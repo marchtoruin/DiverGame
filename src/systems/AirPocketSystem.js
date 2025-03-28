@@ -677,7 +677,7 @@ export default class AirPocketSystem {
                 sprite,
                 type: options.type,
                 oxygenAmount: options.oxygenAmount,
-                respawnTime: options.respawnTime,
+                respawnTime: 30000, // Force 30 seconds respawn time for all air pockets
                 lastCollectTime: 0,
                 active: true,
                 isDestroyed: false,
@@ -885,6 +885,12 @@ export default class AirPocketSystem {
                 return;
             }
             
+            // Clean up any existing particles before collection
+            if (airPocketInstance.particles) {
+                airPocketInstance.particles.destroy();
+                airPocketInstance.particles = null;
+            }
+            
             // Get the oxygen amount from the air pocket
             const oxygenAmount = airPocketInstance.oxygenAmount || 20;
             
@@ -905,27 +911,10 @@ export default class AirPocketSystem {
                 
                 // Ensure proper events are emitted
                 if (typeof playerEntity.emit === 'function') {
-                playerEntity.emit('playerOxygenChanged', playerEntity.oxygen, playerEntity.maxOxygen);
-                
-                    // Emit collect event for sound/visual effects
+                    playerEntity.emit('playerOxygenChanged', playerEntity.oxygen, playerEntity.maxOxygen);
                     playerEntity.emit('collectAirPocket', airPocketSprite);
                 } else if (this.scene && this.scene.events) {
-                    // Fall back to scene events if player can't emit
                     this.scene.events.emit('playerOxygenChanged', playerEntity.oxygen, playerEntity.maxOxygen);
-                    this.scene.events.emit('collectAirPocket', airPocketSprite);
-                }
-            } else if (this.player && this.player.oxygen !== undefined) {
-                // Alternative handling if player entity has separate sprite
-                const prevOxygen = this.player.oxygen;
-                // Add the specified oxygen amount (or go to max)
-                this.player.oxygen = Math.min(this.player.maxOxygen, this.player.oxygen + oxygenAmount);
-                oxygenRefilled = (this.player.oxygen > prevOxygen);
-                
-                if (typeof this.player.emit === 'function') {
-                    this.player.emit('playerOxygenChanged', this.player.oxygen, this.player.maxOxygen);
-                    this.player.emit('collectAirPocket', airPocketSprite);
-                } else if (this.scene && this.scene.events) {
-                    this.scene.events.emit('playerOxygenChanged', this.player.oxygen, this.player.maxOxygen);
                     this.scene.events.emit('collectAirPocket', airPocketSprite);
                 }
             }
@@ -937,114 +926,92 @@ export default class AirPocketSystem {
                 // Create a text popup showing oxygen increase
                 this.createOxygenPopup(pocketX, pocketY, `+${oxygenAmount} O₂`);
                 
-                // Find and mark the corresponding spawn point as inactive
-                if (this.scene.airPocketSpawnPoints) {
-                    const spawnPoint = this.scene.airPocketSpawnPoints.find(sp => 
-                        Math.abs(sp.x - pocketX) < 5 && Math.abs(sp.y - pocketY) < 5
-                    );
-                    if (spawnPoint) {
-                        spawnPoint.active = false;
-                        spawnPoint.lastSpawnTime = this.scene.time.now;
-                        console.log(`Marked spawn point at (${pocketX}, ${pocketY}) as inactive`);
-                    }
-                }
-                
-                // Remove the air pocket
+                // Remove the air pocket (this will start the respawn timer)
                 this.removeAirPocket(airPocketSprite);
             }
-            
         } catch (error) {
             console.error('Error in air pocket overlap handler:', error);
         }
     }
     
     /**
-     * Remove/deactivate an air pocket when collected by player
-     * @param {Object} airPocket - The air pocket sprite to remove
+     * Remove an air pocket and start its respawn timer
+     * @param {Object} airPocket - The air pocket to remove
      */
     removeAirPocket(airPocket) {
         try {
-            // Get the actual AirPocket instance
-            const instance = airPocket.airPocketInstance;
+            const instance = airPocket.airPocketInstance || airPocket;
             
             if (instance) {
-                // Stop the update timer if it exists
-                if (instance.updateTimer) {
-                    instance.updateTimer.remove();
-                    instance.updateTimer = null;
-                }
+                // Store original spawn position
+                const originalX = instance.x;
+                const originalY = instance.y;
                 
-                // Destroy the particle emitter if it exists
+                // Deactivate the air pocket
+                instance.active = false;
+                instance.isDestroyed = true;
+                
+                if (instance.sprite) {
+                    instance.sprite.setVisible(false);
+                    if (instance.sprite.body) {
+                        instance.sprite.body.enable = false;
+                    }
+                }
+
+                // Clean up particles
                 if (instance.particles) {
                     instance.particles.destroy();
                     instance.particles = null;
                 }
                 
-                // Check if deactivate method exists before calling it
-                if (typeof instance.deactivate === 'function') {
-                    instance.deactivate();
-                } else {
-                    // Fallback implementation if deactivate doesn't exist
-                    instance.active = false;
-                    instance.isDestroyed = true;
-                    
-                    if (instance.sprite) {
-                        instance.sprite.setVisible(false);
-                        if (instance.sprite.body) {
-                            instance.sprite.body.enable = false;
-                        }
-                    }
-                    
-                    // Start respawn timer
-                    if (this.scene) {
-                        console.log(`Starting respawn timer for ${instance.respawnTime/1000 || 30} seconds`);
-                        instance.respawnTimer = this.scene.time.delayedCall(instance.respawnTime || 30000, () => {
-                            if (instance.respawn && typeof instance.respawn === 'function') {
-                                instance.respawn();
-                            } else {
-                                // Handle case where respawn doesn't exist
-                                this.respawnAirPocket(instance);
-                            }
-                        });
-                    }
-                }
-            } else {
-                // Fallback for direct sprite handling
-                if (airPocket && typeof airPocket.setVisible === 'function') {
-                    airPocket.setVisible(false);
-                }
-                
-                if (airPocket && airPocket.body) {
-                    airPocket.body.enable = false;
+                // Start respawn timer (30 seconds)
+                if (this.scene) {
+                    console.log('Starting 30 second respawn timer for air pocket');
+                    instance.respawnTimer = this.scene.time.delayedCall(30000, () => {
+                        // Pass original coordinates to respawn
+                        this.respawnAirPocket(instance, originalX, originalY);
+                    });
                 }
             }
-            
         } catch (error) {
             console.error('Error removing air pocket:', error);
         }
     }
 
     /**
-     * Respawn an air pocket (helper for removeAirPocket fallback)
+     * Respawn an air pocket
      * @param {Object} instance - The air pocket instance to respawn
+     * @param {number} originalX - Original X position to respawn at
+     * @param {number} originalY - Original Y position to respawn at
      */
-    respawnAirPocket(instance) {
+    respawnAirPocket(instance, originalX, originalY) {
         if (!instance) return;
+        
+        // Reset position to original spawn point
+        if (originalX !== undefined && originalY !== undefined) {
+            instance.x = originalX;
+            instance.y = originalY;
+        }
         
         instance.active = true;
         instance.isDestroyed = false;
         
         if (instance.sprite) {
+            // Reset sprite position
+            instance.sprite.setPosition(instance.x, instance.y);
             instance.sprite.setVisible(true);
             if (instance.sprite.body) {
                 instance.sprite.body.enable = true;
+                // Reset physics properties
+                instance.sprite.body.setVelocity(0, 0);
+                instance.sprite.body.setAcceleration(0, 0);
             }
             
             // Recreate the visual effects including particles
             this.addVisualEffects(instance);
+            
+            console.log(`Air pocket respawned at original position (${instance.x}, ${instance.y})`);
         }
-        
-        console.log(`Air pocket at (${instance.x}, ${instance.y}) respawned`);
     }
 
     /**

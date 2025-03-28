@@ -2337,9 +2337,71 @@
          "visible":true,
          "x":0,
          "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":7,
+         "name":"Lighting",
+         "objects":[
+                {
+                 "height":224,
+                 "id":15,
+                 "name":"dim",
+                 "properties":[
+                        {
+                         "name":"type",
+                         "type":"string",
+                         "value":"dim"
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":1264,
+                 "x":1984,
+                 "y":3504
+                }, 
+                {
+                 "height":200,
+                 "id":18,
+                 "name":"dark",
+                 "properties":[
+                        {
+                         "name":"type",
+                         "type":"string",
+                         "value":"dark"
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":3616,
+                 "x":-224,
+                 "y":7200
+                }, 
+                {
+                 "height":224,
+                 "id":19,
+                 "name":"black",
+                 "properties":[
+                        {
+                         "name":"type",
+                         "type":"string",
+                         "value":"black"
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":2392,
+                 "x":848,
+                 "y":10648
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
         }],
- "nextlayerid":7,
- "nextobjectid":15,
+ "nextlayerid":8,
+ "nextobjectid":20,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",

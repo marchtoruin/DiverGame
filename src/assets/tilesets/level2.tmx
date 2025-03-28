@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="100" height="500" tilewidth="32" tileheight="32" infinite="0" nextlayerid="7" nextobjectid="15">
+<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="100" height="500" tilewidth="32" tileheight="32" infinite="0" nextlayerid="8" nextobjectid="20">
  <editorsettings>
   <export target="../maps/level2.json" format="json"/>
  </editorsettings>
@@ -2114,6 +2114,23 @@
  <objectgroup id="3" name="PlayerSpawn" class="objectgroup">
   <object id="1" name="PlayerSpawn" type="objectgroup" x="680" y="624">
    <point/>
+  </object>
+ </objectgroup>
+ <objectgroup id="7" name="Lighting">
+  <object id="15" name="dim" x="1984" y="3504" width="1264" height="224">
+   <properties>
+    <property name="type" value="dim"/>
+   </properties>
+  </object>
+  <object id="18" name="dark" x="-224" y="7200" width="3616" height="200">
+   <properties>
+    <property name="type" value="dark"/>
+   </properties>
+  </object>
+  <object id="19" name="black" x="848" y="10648" width="2392" height="224">
+   <properties>
+    <property name="type" value="black"/>
+   </properties>
   </object>
  </objectgroup>
 </map>

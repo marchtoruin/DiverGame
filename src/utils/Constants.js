@@ -59,7 +59,8 @@ export const PLAYER = {
             SUPER_BOOST: 800  // Maximum boost speed
         },
         OXYGEN_COST: 2, // Oxygen units per second during boost
-        BURST_INTERVAL: 40 // Milliseconds between particle bursts during boost
+        BURST_INTERVAL: 40, // Milliseconds between particle bursts during boost
+        COOLDOWN: 500 // Milliseconds of cooldown after boost ends
     },
     BOUNCE: 0.1,
     FRICTION: 0.1
