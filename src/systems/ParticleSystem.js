@@ -755,7 +755,111 @@ export default class ParticleSystem {
      * @param {object} direction - Direction vector {x, y}
      */
     emitMovementBurst(sprite, particleKey, direction) {
-        // Do nothing - disabled all bubbles
-        return;
+        if (!this.enabled || !sprite) return;
+
+        // Calculate offset based on player direction
+        const isFacingLeft = sprite.flipX;
+        let offsetX = isFacingLeft ? 20 : -20;
+        let offsetY = -10;
+
+        // Create movement burst emitter
+        const movementEmitter = this.scene.add.particles(0, 0, particleKey, {
+            x: sprite.x + offsetX,
+            y: sprite.y + offsetY,
+            lifespan: 1000,
+            gravityY: -20,
+            speed: { min: 50, max: 100 },
+            scale: { start: 0.08, end: 0.02 },  // Smaller bubbles
+            alpha: { start: 0.6, end: 0 },
+            angle: { min: 160, max: 200 },
+            rotate: { min: -15, max: 15 },
+            frequency: 25,  // More frequent emission
+            quantity: 3,    // More bubbles per emission
+            emitZone: {
+                type: 'random',
+                source: new Phaser.Geom.Circle(0, 0, 8)  // Slightly wider emission zone
+            },
+            tint: [ 0xffffff, 0xccccff ]
+        }).setDepth(15);
+
+        // Emit more bubbles in the burst
+        movementEmitter.explode(15);  // Increased from 8 to 15
+
+        // Destroy the emitter after particles are done
+        this.scene.time.delayedCall(1100, () => {
+            movementEmitter.destroy();
+        });
+    }
+
+    /**
+     * Creates a particle emitter with the given configuration
+     * @param {Object} config - Configuration for the particle emitter
+     * @returns {Phaser.GameObjects.Particles.ParticleEmitter} The created emitter
+     */
+    createParticleEmitter(config) {
+        if (!this.enabled || !this.scene) return null;
+        
+        try {
+            // Extract required properties
+            const { x, y, texture = 'bubble', ...otherConfig } = config;
+            
+            // Set defaults if not provided
+            const emitterConfig = {
+                x: x || 0,
+                y: y || 0,
+                ...otherConfig
+            };
+            
+            // Create the emitter
+            const emitter = this.scene.add.particles(x, y, texture, emitterConfig);
+            
+            // Store for cleanup
+            const emitterId = `emitter_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+            this.emitters[emitterId] = emitter;
+            
+            return emitter;
+        } catch (error) {
+            console.error('Error creating particle emitter:', error);
+            return null;
+        }
+    }
+    
+    /**
+     * Creates a one-time particle emitter that automatically destroys itself
+     * @param {Object} config - Configuration for the particle emitter
+     * @returns {Phaser.GameObjects.Particles.ParticleEmitter} The created emitter
+     */
+    createOneTimeEmitter(config) {
+        if (!this.enabled || !this.scene) return null;
+        
+        try {
+            // Extract required properties
+            const { x, y, texture = 'bubble', emitCount = 10, lifespan = 1000, ...otherConfig } = config;
+            
+            // Set defaults if not provided
+            const emitterConfig = {
+                x: x || 0,
+                y: y || 0,
+                lifespan: lifespan,
+                frequency: -1, // Only emit when explicity called
+                ...otherConfig
+            };
+            
+            // Create the emitter
+            const emitter = this.scene.add.particles(x, y, texture, emitterConfig);
+            
+            // Emit particles immediately
+            emitter.emitParticle(emitCount);
+            
+            // Set up automatic cleanup after particles die
+            this.scene.time.delayedCall(lifespan + 100, () => {
+                emitter.destroy();
+            });
+            
+            return emitter;
+        } catch (error) {
+            console.error('Error creating one-time particle emitter:', error);
+            return null;
+        }
     }
 } 

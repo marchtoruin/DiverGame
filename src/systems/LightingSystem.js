@@ -526,419 +526,121 @@ export default class LightingSystem {
      */
     update(delta) {
         if (!this.player || !this.overlay) return;
-        
-        // Always update the zone-based lighting, even with flashlight on
-        // to maintain the proper darkness levels
-        
+
         // Normalize delta to prevent jerky transitions on frame drops
-        const normalizedDelta = Math.min(delta, 32); // Cap at ~30fps equivalent to avoid huge jumps
-        
-        // Make sure we're getting the right player coordinates
+        const normalizedDelta = Math.min(delta, 32);
+
+        // Get player coordinates
         const playerX = this.player.sprite ? this.player.sprite.x : this.player.x;
         const playerY = this.player.sprite ? this.player.sprite.y : this.player.y;
-        
-        // Get player velocity for fast movement prediction
-        let playerVelocityX = 0;
-        let playerVelocityY = 0;
-        
-        if (this.player.sprite && this.player.sprite.body) {
-            playerVelocityX = this.player.sprite.body.velocity.x;
-            playerVelocityY = this.player.sprite.body.velocity.y;
-        } else if (this.player.body) {
-            playerVelocityX = this.player.body.velocity.x;
-            playerVelocityY = this.player.body.velocity.y;
-        }
-        
-        // Check velocity magnitude to see if player is moving fast (likely boosting)
-        const velocityMagnitude = Math.sqrt(
-            (playerVelocityX * playerVelocityX) + 
-            (playerVelocityY * playerVelocityY)
-        );
-        
-        // Calculate if this is mainly vertical movement (for boosting detection)
-        const isMainlyVertical = Math.abs(playerVelocityY) > Math.abs(playerVelocityX * 1.5);
-        const isMovingDown = playerVelocityY > 0;
-        const isVerticalBoosting = isMainlyVertical && isMovingDown && velocityMagnitude > 500;
-        
-        // Update flashlight rotation based on player's direction
-        if (this.flashlightEnabled && this.player) {
-            // First, check if player has sprite with flipX property
-            if (this.player.sprite && this.player.sprite.flipX !== undefined) {
-                // Use the same logic as bullets - flipX determines left/right direction
-                this.flashlightRotation = this.player.sprite.flipX ? Math.PI : 0; // left or right
-            } 
-            // Then check if the flashlightRotation has been set directly from GameScene
-            else if (this.scene.flashlightRotation !== undefined) {
-                this.flashlightRotation = this.scene.flashlightRotation;
-            }
-            // Fallback to other properties if sprite.flipX isn't available
-            else if (this.player.sprite && this.player.sprite.rotation !== undefined) {
-                this.flashlightRotation = this.player.sprite.rotation;
-            } else if (this.player.rotation !== undefined) {
-                this.flashlightRotation = this.player.rotation;
-            } else if (this.player.direction) {
-                // Convert direction to rotation if needed
-                const directions = {
-                    'left': Math.PI, // left is Pi radians (180 degrees)
-                    'right': 0,      // right is 0 radians (0 degrees)
-                    'up': -Math.PI/2,// up is -Pi/2 radians (-90 degrees)
-                    'down': Math.PI/2 // down is Pi/2 radians (90 degrees)
-                };
-                this.flashlightRotation = directions[this.player.direction] || 0;
-            } else if (this.player.facing) {
-                // Try to use facing direction
-                const directions = {
-                    'left': Math.PI,
-                    'right': 0,
-                    'up': -Math.PI/2,
-                    'down': Math.PI/2
-                };
-                this.flashlightRotation = directions[this.player.facing] || 0;
-            }
-        }
-        
-        // COMPLETELY NEW APPROACH: For vertical boost detection, we'll use position tracking
-        // between frames and more aggressive checking
+
         let shouldCheckZones = true;
         let inAnyZone = false;
         let highestLightLevel = 0;
         let enteredNewZone = false;
         let currentZoneType = null;
-        
-        // Initialize previous position if it's the first frame
-        if (this.prevPlayerX === null || this.prevPlayerY === null) {
-            this.prevPlayerX = playerX;
-            this.prevPlayerY = playerY;
-        }
-        
-        // Check if we need to perform a comprehensive zone check
+
+        // Only check zones periodically or on significant movement
         const currentTime = this.scene.time.now;
         const timeSinceLastCheck = currentTime - this.lastCheckTime;
-        const distanceMoved = Phaser.Math.Distance.Between(
-            this.prevPlayerX, this.prevPlayerY,
-            playerX, playerY
-        );
-        
-        // Check if we have a vertical boost situation that requires special handling
-        if (isVerticalBoosting && distanceMoved > 50) {
-            // Debug visualization
-            if (this.scene.physics.config.debug) {
-                // Clean up any previous debug graphics
-                if (this.debugBoostLines) {
-                    this.debugBoostLines.destroy();
-                }
-                
-                // Create new debug graphics
-                this.debugBoostLines = this.scene.add.graphics();
-                this.debugBoostLines.lineStyle(2, 0xff0000, 1);
-                this.debugBoostLines.moveTo(this.prevPlayerX, this.prevPlayerY);
-                this.debugBoostLines.lineTo(playerX, playerY);
-                this.debugBoostLines.setDepth(1000);
-                
-                // Add debug text
-                if (this.debugBoostText) {
-                    this.debugBoostText.destroy();
-                }
-                this.debugBoostText = this.scene.add.text(
-                    10, 100,
-                    `BOOSTING: Down ${distanceMoved.toFixed(0)}px, Speed: ${velocityMagnitude.toFixed(0)}`,
-                    { fontSize: '14px', fill: '#ff0000', backgroundColor: '#000000' }
-                ).setScrollFactor(0).setDepth(1000);
-                
-                // Clean up after a delay
-                this.scene.time.delayedCall(500, () => {
-                    if (this.debugBoostLines) {
-                        this.debugBoostLines.destroy();
-                        this.debugBoostLines = null;
-                    }
-                    if (this.debugBoostText) {
-                        this.debugBoostText.destroy();
-                        this.debugBoostText = null;
-                    }
-                });
-            }
-            
-            // Check all potential zones between previous and current position
-            // by creating a series of check points along the movement path
-            const checkPoints = [];
-            const segmentCount = Math.max(5, Math.ceil(distanceMoved / 30)); // At least one check every 30px
-            
-            // Generate check points along the movement path
-            for (let i = 0; i <= segmentCount; i++) {
-                const ratio = i / segmentCount;
-                const checkX = this.prevPlayerX + (playerX - this.prevPlayerX) * ratio;
-                const checkY = this.prevPlayerY + (playerY - this.prevPlayerY) * ratio;
-                checkPoints.push({ x: checkX, y: checkY });
-            }
-            
-            // Also add perpendicular check points for wider detection
-            const extendedCheckPoints = [...checkPoints];
-            
-            if (isMainlyVertical) {
-                // For vertical movement, add points to left and right
-                const spacing = 40; // Spacing between parallel lines
-                
-                checkPoints.forEach(point => {
-                    extendedCheckPoints.push({ x: point.x - spacing, y: point.y });
-                    extendedCheckPoints.push({ x: point.x + spacing, y: point.y });
-                    extendedCheckPoints.push({ x: point.x - spacing*2, y: point.y });
-                    extendedCheckPoints.push({ x: point.x + spacing*2, y: point.y });
-                });
-            }
-            
-            // Check each zone against all check points
+        const distanceMoved = this.prevPlayerX !== null ? 
+            Phaser.Math.Distance.Between(
+                this.prevPlayerX, this.prevPlayerY,
+                playerX, playerY
+            ) : 0;
+
+        if (timeSinceLastCheck > this.checkInterval || distanceMoved > 30) {
+            // Check each lighting zone
             for (const zone of this.lightingZones) {
                 // Skip default zones
                 if (zone.type === 'default') continue;
-                
-                // Check if any of our check points are inside this zone
-                for (const point of extendedCheckPoints) {
-                    if (Phaser.Geom.Rectangle.Contains(zone.rect, point.x, point.y)) {
-                        inAnyZone = true;
-                        currentZoneType = zone.type;
-                        
-                        // Get the light level for this zone
-                        const zoneLevel = this.zoneLevels[zone.type] || 0;
-                        
-                        // Track the highest (darkest) light level
-                        if (zoneLevel > highestLightLevel) {
-                            highestLightLevel = zoneLevel;
-                        }
-                        
-                        // Check if this is a different zone than we were in previously
-                        if (this.currentZoneType !== zone.type) {
-                            enteredNewZone = true;
-                            
-                            if (this.scene.physics.config.debug) {
-                                console.log(`Player entered new ${zone.type} zone (boost check)`);
-                            }
-                        }
-                        
-                        // Once we've found a zone match, we can stop checking this zone
-                        break;
-                    }
-                }
-            }
-            
-            // Mark that we've done a special boost check
-            this.lastCheckTime = currentTime;
-            shouldCheckZones = false; // Skip the regular zone check
-        }
-        // Regular movement - check every interval or if significant position change
-        else if (timeSinceLastCheck > this.checkInterval || distanceMoved > 30) {
-            // Standard position-based detection for normal speeds
-            for (const zone of this.lightingZones) {
-                // Skip default zones for checking
-                if (zone.type === 'default') continue;
-                
+
                 // Check if player is in this zone
                 if (Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
                     inAnyZone = true;
                     currentZoneType = zone.type;
-                    
+
                     // Get the light level for this zone
                     const zoneLevel = this.zoneLevels[zone.type] || 0;
-                    
+
                     // Track the highest (darkest) light level
                     if (zoneLevel > highestLightLevel) {
                         highestLightLevel = zoneLevel;
                     }
-                    
+
                     // Check if this is a different zone than we were in previously
                     if (this.currentZoneType !== zone.type) {
                         enteredNewZone = true;
-                        
                         if (this.scene.physics.config.debug) {
                             console.log(`Player entered new ${zone.type} zone`);
                         }
                     }
                 }
             }
-            
-            // Mark that we've done a regular check
+
+            // Update the previous position for next frame check
+            this.prevPlayerX = playerX;
+            this.prevPlayerY = playerY;
             this.lastCheckTime = currentTime;
-            shouldCheckZones = false; // Skip additional checks
         }
-        
-        // Update the previous position for next frame check
-        this.prevPlayerX = playerX;
-        this.prevPlayerY = playerY;
-        
-        // Only update target light level if:
-        // 1. We entered a new zone OR
-        // 2. We weren't in any zone before and now we are
+
+        // Handle zone transitions
         if (enteredNewZone || (inAnyZone && !this.currentZoneType)) {
-            this.targetLightLevel = highestLightLevel;
-            this.currentZoneType = currentZoneType;
-            
-            // Store the transition start time and value for smooth easing
+            // Store transition start state
             this.transitionStartTime = this.scene.time.now;
             this.transitionStartValue = this.currentLightLevel;
-            this.transitionDuration = Math.abs(this.targetLightLevel - this.currentLightLevel) * 5000; // Dynamic duration based on distance
             
+            // Set target light level based on new zone
+            this.targetLightLevel = highestLightLevel;
+            this.currentZoneType = currentZoneType;
+
+            // Calculate transition duration based on light level difference
+            const levelDifference = Math.abs(this.targetLightLevel - this.currentLightLevel);
+            this.transitionDuration = Math.max(1000, levelDifference * 2000);
+
             if (this.scene.physics.config.debug) {
-                console.log(`Set lighting level to ${currentZoneType} (${this.targetLightLevel})`);
-                console.log(`Transition duration: ${this.transitionDuration}ms`);
-            }
-        } 
-        // ADDED: Keep track of the deepest level reached for darkness persistence
-        // This prevents returning to brightness when leaving all zones
-        else if (inAnyZone && this.currentZoneType) {
-            // Update to the highest level if a darker zone is entered
-            if (highestLightLevel > this.targetLightLevel) {
-                this.targetLightLevel = highestLightLevel;
-                this.currentZoneType = currentZoneType;
-                
-                // Store the transition start time and value for smooth easing
-                this.transitionStartTime = this.scene.time.now;
-                this.transitionStartValue = this.currentLightLevel;
-                this.transitionDuration = Math.abs(this.targetLightLevel - this.currentLightLevel) * 5000;
-                
-                if (this.scene.physics.config.debug) {
-                    console.log(`Updating to deeper darkness level: ${currentZoneType} (${this.targetLightLevel})`);
-                }
-            }
-            // ADDED: When ascending, we should transition to the lighter zone
-            // But only when we're actually in that zone (controlled ascent)
-            else if (highestLightLevel < this.targetLightLevel && currentZoneType) {
-                // Track which zones we've passed through while ascending
-                if (!this.ascendingZoneHistory) {
-                    this.ascendingZoneHistory = {};
-                }
-                
-                // Record that we've been in this zone during ascent
-                this.ascendingZoneHistory[currentZoneType] = true;
-                
-                // Only switch to a lighter level if we're in a zone with appropriate light level
-                // This prevents instantly going to full brightness when briefly outside any zone
-                this.targetLightLevel = highestLightLevel;
-                this.currentZoneType = currentZoneType;
-                
-                // Store the transition start time and value for smooth easing
-                this.transitionStartTime = this.scene.time.now;
-                this.transitionStartValue = this.currentLightLevel;
-                // Slower transition when getting brighter (twice as slow)
-                this.transitionDuration = Math.abs(this.targetLightLevel - this.currentLightLevel) * 10000;
-                
-                if (this.scene.physics.config.debug) {
-                    console.log(`Ascending to lighter level: ${currentZoneType} (${this.targetLightLevel})`);
-                }
+                console.log(`Transitioning to ${currentZoneType} (${this.targetLightLevel}) over ${this.transitionDuration}ms`);
             }
         }
-        
-        // Process vertical boost detection specially for ascent as well
-        if (isVerticalBoosting) {
-            // Calculate if this is mainly upward vertical movement (for ascent detection)
-            const isAscending = isMainlyVertical && !isMovingDown;
-            
-            // If ascending rapidly, we need to detect all zones we pass through
-            if (isAscending && this.currentZoneType !== 'default' && this.targetLightLevel > 0) {
-                // Check each zone against all check points to see if we're passing through lighter zones
-                for (const zone of this.lightingZones) {
-                    // Skip default and darker zones
-                    if (zone.type === 'default') continue;
-                    
-                    // Get zone light level
-                    const zoneLevel = this.zoneLevels[zone.type] || 0;
-                    
-                    // Only consider lighter zones than our current state
-                    if (zoneLevel >= this.targetLightLevel) continue;
-                    
-                    // If any of our extended check points are in this zone while ascending
-                    for (const point of extendedCheckPoints) {
-                        if (Phaser.Geom.Rectangle.Contains(zone.rect, point.x, point.y)) {
-                            // We're passing through a lighter zone while ascending
-                            // Use it as our new target if we haven't already
-                            if (zoneLevel < this.targetLightLevel) {
-                                this.targetLightLevel = zoneLevel;
-                                this.currentZoneType = zone.type;
-                                
-                                // Store the transition start time and value for smooth easing
-                                this.transitionStartTime = this.scene.time.now;
-                                this.transitionStartValue = this.currentLightLevel;
-                                // Slower transition when getting brighter (twice as slow)
-                                this.transitionDuration = Math.abs(this.targetLightLevel - this.currentLightLevel) * 10000;
-                                
-                                if (this.scene.physics.config.debug) {
-                                    console.log(`Rapid ascent - moving to lighter zone: ${zone.type} (${zoneLevel})`);
-                                }
-                            }
-                            break; // No need to check other points for this zone
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Gradually transition to target light level with advanced easing
+
+        // Handle the actual transition
         if (this.currentLightLevel !== this.targetLightLevel) {
             this.transitionActive = true;
-            
-            // Calculate progress based on time elapsed (time-based easing instead of step-based)
+
+            // Calculate transition progress
             const elapsed = this.scene.time.now - (this.transitionStartTime || 0);
             const progress = Math.min(1, elapsed / Math.max(1, this.transitionDuration));
-            
-            // Apply cubic easing function: t³ (cubic ease-in-out)
-            // This creates very slow starts and ends with a gradual acceleration in the middle
+
+            // Apply smooth easing
             let easedProgress;
-            
             if (progress < 0.5) {
-                // First half - ease in (cubic)
                 easedProgress = 4 * Math.pow(progress, 3);
             } else {
-                // Second half - ease out (cubic)
                 easedProgress = 1 - Math.pow(-2 * progress + 2, 3) / 2;
             }
-            
-            // Apply additional fine-grained easing for extra smoothness at transition endpoints
-            if (progress < 0.1) {
-                // Extra slow at the very beginning (0-10%)
-                easedProgress = easedProgress * (progress * 10); // Linear ramp up
-            } else if (progress > 0.9) {
-                // Extra slow at the very end (90-100%)
-                const endProgress = (1 - progress) * 10; // 1.0 at 90%, 0.0 at 100%
-                easedProgress = 1 - ((1 - easedProgress) * endProgress); // Linear ramp down
-            }
-            
-            // Calculate the new light level by interpolating between start and target values
-            this.currentLightLevel = this.transitionStartValue + (this.targetLightLevel - this.transitionStartValue) * easedProgress;
-            
-            // Update overlay alpha with rounded value to prevent visual glitches
+
+            // Update light level
+            this.currentLightLevel = this.transitionStartValue + 
+                (this.targetLightLevel - this.transitionStartValue) * easedProgress;
+
+            // Update overlay with rounded alpha to prevent visual glitches
             const roundedAlpha = Math.round(this.currentLightLevel * 1000) / 1000;
             this.overlay.setAlpha(roundedAlpha);
-            
-            // Check if transition is complete (with a small threshold)
+
+            // Check if transition is complete
             if (Math.abs(this.currentLightLevel - this.targetLightLevel) < 0.001 || progress >= 1) {
                 this.currentLightLevel = this.targetLightLevel;
                 this.transitionActive = false;
-                
-                if (this.scene.physics.config.debug) {
-                    console.log(`Lighting transition complete: ${this.currentZoneType} (${this.currentLightLevel})`);
-                }
             }
         }
-        
+
         // Update flashlight if enabled
         if (this.flashlightEnabled) {
             this.updateFlashlightCone();
         }
-        
-        // Update any dynamic point lights
-        this.updatePointLights(delta);
-        
+
         // Update debug text if enabled
         this.updateDebugText();
-    }
-    
-    /**
-     * Update all point lights
-     * @param {number} delta - Time elapsed since last update
-     */
-    updatePointLights(delta) {
-        if (!this.playerLight) return;
-        
-        // Update the player light position
-        this.playerLight.update();
     }
     
     /**

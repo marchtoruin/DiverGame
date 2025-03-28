@@ -84,6 +84,11 @@ export default class TilemapSystem {
         }
     }
 
+    /**
+     * Process the map creation and emit the event once everything is ready
+     * @param {string} key - The key of the map to create
+     * @returns {boolean} Whether the map was created successfully
+     */
     createFromTiledJSON(key) {
         try {
             console.log('Starting tilemap creation with key:', key);
@@ -104,6 +109,33 @@ export default class TilemapSystem {
             
             const cacheData = cache.get(key);
             
+            // ENHANCED DEBUGGING: Print debug info about the AirPockets layer
+            console.log('Analyzing map data for air pockets:');
+            if (cacheData.data && cacheData.data.layers) {
+                const airPocketsLayer = cacheData.data.layers.find(layer => 
+                    layer.name === 'AirPockets' || layer.name.toLowerCase() === 'airpockets'
+                );
+                
+                if (airPocketsLayer) {
+                    console.log('AirPockets layer found:', {
+                        id: airPocketsLayer.id,
+                        name: airPocketsLayer.name,
+                        objectCount: airPocketsLayer.objects?.length || 0
+                    });
+                    
+                    if (airPocketsLayer.objects && airPocketsLayer.objects.length > 0) {
+                        console.log('AirPocket objects in JSON:', airPocketsLayer.objects.length);
+                        airPocketsLayer.objects.forEach((obj, idx) => {
+                            console.log(`AirPocket #${idx} JSON:`, JSON.stringify(obj, null, 2));
+                        });
+                    } else {
+                        console.error('AirPockets layer exists but has no objects!');
+                    }
+                } else {
+                    console.error('No AirPockets layer found in map JSON!');
+                }
+            }
+            
             // Validate required layers exist
             if (cacheData.data && cacheData.data.layers) {
                 const layers = cacheData.data.layers;
@@ -118,25 +150,6 @@ export default class TilemapSystem {
                 if (missingLayers.length > 0) {
                     console.error(`Missing required layers: ${missingLayers.join(', ')}`);
                     console.warn('Will attempt to continue, but map may not function correctly');
-                }
-                
-                // Validate layer types
-                const invalidLayers = layers.filter(layer => {
-                    const isObjectGroup = layer.class === 'objectgroup' || 
-                                        layer.type === 'objectgroup' || 
-                                        Array.isArray(layer.objects);
-                                        
-                    const isTileLayer = layer.class === 'tilelayer' || 
-                                      layer.type === 'tilelayer' || 
-                                      Array.isArray(layer.data);
-                                      
-                    return !isObjectGroup && !isTileLayer;
-                });
-                
-                if (invalidLayers.length > 0) {
-                    console.error(`Found ${invalidLayers.length} layers with invalid types:`, 
-                        invalidLayers.map(l => l.name));
-                    console.warn('These layers will be skipped');
                 }
             }
             
@@ -162,317 +175,45 @@ export default class TilemapSystem {
                 // Set the map origin to 0,0 to ensure proper alignment
                 this.map.setPosition(0, 0);
                 
-                // Get all tileset data from the map
-                const tilesetData = this.map.tilesets || [];
-                if (tilesetData.length === 0) {
-                    console.error('Map has no tilesets!');
+                // Create layers using the helper method
+                this.layers = this.createLayers(this.map);
+                
+                // Try to process objects (like spawn points)
+                this.processMapObjects();
+                
+                // CRITICAL: Make sure the tilemapSystem is available to other systems by setting it on the scene
+                this.scene.tilemapSystem = this;
+                
+                // CRITICAL: Store the original map data for direct access if needed
+                this.mapData = cacheData.data;
+                
+                // Only emit the tilemapCreated event if the map and layers were created successfully
+                if (this.map && this.layers) {
+                    console.log('Tilemap creation successful - emitting tilemapCreated event with full map');
+                    
+                    // Set a flag that tilemap is ready
+                    this.isMapReady = true;
+                    
+                    // Add a small delay to ensure all systems are ready to receive the event
+                    this.scene.time.delayedCall(50, () => {
+                        // Emit the event with the full map data so systems can access it directly
+                        this.scene.events.emit('tilemapCreated', this.map, cacheData.data);
+                        
+                        // Emit a subsequent event specifically for object processing
+                        this.scene.events.emit('mapObjectsReady', this.objectLayers);
+                    });
+                } else {
+                    console.warn('Failed to create complete tilemap');
                 }
                 
-                // Add tilesets using AssetManagementSystem
-                const addedTilesets = [];
-                let tilesetLoadingSuccess = false;
-                
-                // Process embedded tilesets for special collection-based (tile-based) tilesets
-                const collectionTilesets = tilesetData.filter(ts => ts.tiles && ts.tiles.length > 0);
-                if (collectionTilesets.length > 0) {
-                    console.log(`Found ${collectionTilesets.length} collection-based tilesets`);
-                    
-                    for (const tileset of collectionTilesets) {
-                        console.log(`Processing collection tileset: ${tileset.name} (firstgid: ${tileset.firstgid})`);
-                        
-                        // Collection tilesets store individual images for each tile
-                        // Try to find a common image format all tiles use
-                        const tileImageKeys = new Set();
-                        
-                        // Extract image keys from the individual tiles
-                        tileset.tiles.forEach(tile => {
-                            if (tile.image) {
-                                // Get filename without path
-                                const imagePath = tile.image;
-                                const fileName = imagePath.split('/').pop().split('\\').pop();
-                                const fileNameNoExt = fileName.split('.')[0];
-                                
-                                // Store both with/without extension
-                                tileImageKeys.add(fileName);
-                                tileImageKeys.add(fileNameNoExt);
-                                
-                                // Also add mapped keys if available
-                                if (this.imageKeyMap[imagePath]) tileImageKeys.add(this.imageKeyMap[imagePath]);
-                                if (this.imageKeyMap[fileName]) tileImageKeys.add(this.imageKeyMap[fileName]);
-                                if (this.imageKeyMap[fileNameNoExt]) tileImageKeys.add(this.imageKeyMap[fileNameNoExt]);
-                            }
-                        });
-                        
-                        // Try to add the collection tileset using each possible image key
-                        let collectionAdded = false;
-                        for (const imageKey of tileImageKeys) {
-                            if (availableTextures.includes(imageKey)) {
-                                try {
-                                    const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                    if (addedTileset) {
-                                        console.log(`Successfully added collection tileset: ${tileset.name} with key ${imageKey}`);
-                                        addedTilesets.push(addedTileset);
-                                        collectionAdded = true;
-                                        tilesetLoadingSuccess = true;
-                                        break;
-                                    }
-                                } catch (e) {
-                                    // Continue to next key
-                                }
-                            }
-                        }
-                        
-                        // If no image key worked, try with the tileset name as key
-                        if (!collectionAdded && availableTextures.includes(tileset.name)) {
-                            try {
-                                const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                if (addedTileset) {
-                                    console.log(`Successfully added collection tileset using its own name as key`);
-                                    addedTilesets.push(addedTileset);
-                                    tilesetLoadingSuccess = true;
-                                }
-                            } catch (e) {
-                                // Continue to next approach
-                            }
-                        }
-                    }
-                }
-                
-                // APPROACH 1: Try each standard tileset by its name directly (most reliable)
-                const standardTilesets = tilesetData.filter(ts => !ts.tiles || ts.tiles.length === 0);
-                for (const tileset of standardTilesets) {
-                    const tilesetName = tileset.name;
-                    
-                    // First, try with the exact tileset name directly (best match)
-                    try {
-                        if (availableTextures.includes(tilesetName)) {
-                            const addedTileset = this.addTilesetToMap(this.map, tileset);
-                            
-                            if (addedTileset) {
-                                console.log(`Added tileset with exact name: ${tilesetName}`);
-                                addedTilesets.push(addedTileset);
-                                tilesetLoadingSuccess = true;
-                                continue; // Skip other attempts for this tileset
-                            }
-                        }
-                    } catch (e) {
-                        // Try the next approach
-                    }
-                    
-                    // If embedded image is present, extract the filename and try with that
-                    if (tileset.image) {
-                        const imagePath = tileset.image;
-                        const fileName = imagePath.split('/').pop().split('\\').pop();
-                        const fileNameNoExt = fileName.split('.')[0];
-                        
-                        try {
-                            // First try with mapped key from the path
-                            if (this.imageKeyMap[imagePath] && availableTextures.includes(this.imageKeyMap[imagePath])) {
-                                const mappedKey = this.imageKeyMap[imagePath];
-                                const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                
-                                if (addedTileset) {
-                                    console.log(`Added tileset ${tilesetName} with mapped image path key: ${mappedKey}`);
-                                    addedTilesets.push(addedTileset);
-                                    tilesetLoadingSuccess = true;
-                                    continue; // Skip other attempts for this tileset
-                                }
-                            }
-                        } catch (e) {
-                            // Try the next approach
-                        }
-                        
-                        try {
-                            // Try with mapped key from the filename
-                            if (this.imageKeyMap[fileName] && availableTextures.includes(this.imageKeyMap[fileName])) {
-                                const mappedKey = this.imageKeyMap[fileName];
-                                const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                
-                                if (addedTileset) {
-                                    console.log(`Added tileset ${tilesetName} with mapped filename key: ${mappedKey}`);
-                                    addedTilesets.push(addedTileset);
-                                    tilesetLoadingSuccess = true;
-                                    continue; // Skip other attempts for this tileset
-                                }
-                            }
-                        } catch (e) {
-                            // Try the next approach
-                        }
-                        
-                        try {
-                            // Try with the filename (without extension)
-                            if (availableTextures.includes(fileNameNoExt)) {
-                                const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                
-                                if (addedTileset) {
-                                    console.log(`Added tileset ${tilesetName} with filename (no ext): ${fileNameNoExt}`);
-                                    addedTilesets.push(addedTileset);
-                                    tilesetLoadingSuccess = true;
-                                    continue; // Skip other attempts for this tileset
-                                }
-                            }
-                        } catch (e) {
-                            // Try the next approach
-                        }
-                        
-                        try {
-                            // Try with the filename (with extension)
-                            if (availableTextures.includes(fileName)) {
-                                const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                
-                                if (addedTileset) {
-                                    console.log(`Added tileset ${tilesetName} with filename: ${fileName}`);
-                                    addedTilesets.push(addedTileset);
-                                    tilesetLoadingSuccess = true;
-                                    continue; // Skip other attempts for this tileset
-                                }
-                            }
-                        } catch (e) {
-                            // Try the next approach
-                        }
-                    }
-                    
-                    // APPROACH 2: Try with firstgid-based mapping as a last resort
-                    try {
-                        const firstGidKey = `firstgid_${tileset.firstgid}`;
-                        if (this.imageKeyMap[firstGidKey] && availableTextures.includes(this.imageKeyMap[firstGidKey])) {
-                            const mappedKey = this.imageKeyMap[firstGidKey];
-                            const addedTileset = this.addTilesetToMap(this.map, tileset);
-                            
-                            if (addedTileset) {
-                                console.log(`Added tileset ${tilesetName} with firstgid mapping: ${mappedKey}`);
-                                addedTilesets.push(addedTileset);
-                                tilesetLoadingSuccess = true;
-                                continue; // Skip other attempts for this tileset
-                            }
-                        }
-                    } catch (e) {
-                        // Final approach failed, will try with the next tileset
-                    }
-                    
-                    console.log(`Failed to add tileset: ${tilesetName}`);
-                }
-                
-                // APPROACH 3: Final attempt - try to add all known texture keys
-                if (!tilesetLoadingSuccess) {
-                    console.warn('Failed to load tilesets with direct mappings, trying all available textures...');
-                    
-                    // Try all known textures as a fallback
-                    for (const textureKey of availableTextures) {
-                        try {
-                            // Skip system textures
-                            if (textureKey.startsWith('__') || textureKey === 'missing') continue;
-                            
-                            for (const tileset of tilesetData) {
-                                try {
-                                    const addedTileset = this.addTilesetToMap(this.map, tileset);
-                                    if (addedTileset) {
-                                        console.log(`Added tileset ${tileset.name} with texture key: ${textureKey}`);
-                                        addedTilesets.push(addedTileset);
-                                        tilesetLoadingSuccess = true;
-                                    }
-                                } catch (e) {
-                                    // Try next combination
-                                }
-                            }
-                        } catch (e) {
-                            // Continue to next texture key
-                        }
-                    }
-                }
-                
-                // If no tilesets were loaded, use fallback map
-                if (!tilesetLoadingSuccess) {
-                    console.error('Failed to load any tilesets. Using fallback map...');
-                    this.createFallbackMap();
-                    return false;
-                }
-                
-                // Get all layer names from the map
-                const layersToCreate = this.map.layers.map(l => l.name);
-                console.log(`Attempting to create ${layersToCreate.length} layers:`, layersToCreate);
-                
-                // Create each layer
-                for (const layerName of layersToCreate) {
-                    try {
-                        console.log(`Creating layer: ${layerName}`);
-                        const layer = this.map.createLayer(layerName, addedTilesets);
-                        
-                        if (layer) {
-                            console.log(`SUCCESS! Created layer: ${layerName}`);
-                            
-                            // Use MapConfigurationSystem to configure the layer if available
-                            if (this.scene.mapConfigSystem) {
-                                this.scene.mapConfigSystem.configureLayer(layer, layerName);
-                            } else {
-                                // Fallback to old configuration if MapConfigurationSystem is not available
-                                const lowerName = layerName.toLowerCase();
-                                
-                                if (lowerName === 'background') {
-                                    layer.setDepth(10);
-                                    layer.setScrollFactor(0.1);
-                                    layer.setScale(1.0);
-                                } 
-                                else if (lowerName.includes('background_sprites')) {
-                                    layer.setDepth(20);
-                                    layer.setScrollFactor(0.3);
-                                    layer.setScale(1.0);
-                                }
-                                else if (lowerName.includes('midground')) {
-                                    layer.setDepth(30);
-                                    layer.setScrollFactor(0.7);
-                                    layer.setScale(1.0);
-                                }
-                                else if (lowerName.includes('obstacle')) {
-                                    layer.setDepth(40);
-                                    layer.setScrollFactor(1.0);
-                                    layer.setCollisionByExclusion([-1]);
-                                }
-                                else {
-                                    layer.setDepth(25);
-                                    layer.setScrollFactor(1.0);
-                                }
-                                
-                                layer.setVisible(true);
-                                layer.setAlpha(1);
-                            }
-                            
-                            // Store in our layers object with normalized name
-                            const normalizedName = lowerName.replace(/[^a-z0-9_]/g, '_');
-                            this.layers[normalizedName] = layer;
-                            console.log(`Stored layer as ${normalizedName}`);
-                        } else {
-                            console.error(`Failed to create layer ${layerName} - returned null`);
-                        }
-                    } catch (e) {
-                        console.error(`Error creating layer ${layerName}:`, e.message);
-                    }
-                }
-                
-                // Set world bounds based on map size
-                const mapWidth = this.map.widthInPixels;
-                const mapHeight = this.map.heightInPixels;
-                this.scene.physics.world.setBounds(0, 0, mapWidth, mapHeight);
-                this.scene.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
-                
-                // Check if we created any layers
-                console.log(`Created ${Object.keys(this.layers).length} layers`);
-                
-                // If at least one layer was created, the tilemap was loaded successfully
-                if (Object.keys(this.layers).length > 0) {
-                    // Try to process objects (like spawn points)
-                    this.processMapObjects();
-                    
-                    return true;
-                }
-                
-                // If we get here, loading failed even with the tilesets, so use fallback
-                console.log('Failed to create any layers. Using fallback map...');
+                return true;
+            } else {
+                console.error('Invalid tilemap data for key:', key);
                 this.createFallbackMap();
                 return false;
             }
-        } catch (e) {
-            console.error('Error in createFromTiledJSON:', e);
+        } catch (error) {
+            console.error('Error creating tilemap from Tiled JSON:', error);
             this.createFallbackMap();
             return false;
         }
@@ -491,6 +232,12 @@ export default class TilemapSystem {
         
         console.log(`Map has ${this.map.objects.length} object layers`);
         
+        // Log ALL layer names in the map for debugging
+        console.log('Map contains these object layers:');
+        this.map.objects.forEach(layer => {
+            console.log(`- Layer: "${layer.name}" with ${layer.objects?.length || 0} objects`);
+        });
+        
         // Process each object layer
         this.map.objects.forEach(objectLayer => {
             console.log(`Processing object layer: ${objectLayer.name} with ${objectLayer.objects.length} objects`);
@@ -505,98 +252,127 @@ export default class TilemapSystem {
                 return;
             }
             
-            if (objectLayer.name === 'PlayerSpawn') {
-                // Validate spawn point objects
-                const spawnPoints = objectLayer.objects.filter(obj => 
-                    obj.name === 'PlayerSpawn' || obj.type === 'PlayerSpawn' ||
-                    obj.name === 'player' || obj.type === 'player' ||
-                    obj.name === 'spawn' || obj.type === 'spawn' ||
-                    obj.name === 'start' || obj.type === 'start'
-                );
-                
-                if (spawnPoints.length === 0) {
-                    console.error('No valid player spawn point found in PlayerSpawn layer');
-                    return;
-                }
-                
-                if (spawnPoints.length > 1) {
-                    console.warn(`Found ${spawnPoints.length} spawn points, using the first one`);
-                }
-                
-                const spawnPoint = spawnPoints[0];
-                this.playerSpawnPoint = {
-                    x: spawnPoint.x,
-                    y: spawnPoint.y
-                };
-                console.log(`Found player spawn point at ${this.playerSpawnPoint.x}, ${this.playerSpawnPoint.y}`);
-            }
-            
-            if (objectLayer.name === 'AirPockets') {
-                console.log('Found AirPockets layer, processing air pocket objects...');
-                
-                // Validate air pocket objects - they must be point objects with required properties
-                const validAirPockets = objectLayer.objects.filter(obj => {
-                    // Must be a point object
-                    if (!obj.point) {
-                        console.warn(`Air pocket at (${obj.x}, ${obj.y}) is not a point object - skipping`);
-                        return false;
+            // Process each layer by its specific name to ensure proper handling
+            switch(objectLayer.name) {
+                case 'Lighting':
+                    console.log('Processing Lighting layer with object types: dim/dark/black');
+                    // Pass lighting objects to the LightingSystem
+                    if (this.scene.lightingSystem) {
+                        this.scene.lightingSystem.processLightingObjects(objectLayer.objects);
                     }
+                    break;
                     
-                    // Must have valid position
-                    if (typeof obj.x !== 'number' || typeof obj.y !== 'number') {
-                        console.warn(`Air pocket has invalid position - skipping`);
-                        return false;
+                case 'PlayerSpawn':
+                    console.log('Processing PlayerSpawn layer');
+                    // We expect only one spawn point in this layer
+                    const spawnPoint = objectLayer.objects[0]; // Just use the first one
+                    if (spawnPoint) {
+                        this.playerSpawnPoint = {
+                            x: spawnPoint.x,
+                            y: spawnPoint.y
+                        };
+                        console.log(`Found player spawn point at ${this.playerSpawnPoint.x}, ${this.playerSpawnPoint.y}`);
+                    } else {
+                        console.warn('No spawn point found in PlayerSpawn layer');
                     }
+                    break;
                     
-                    // Must have properties array
-                    if (!Array.isArray(obj.properties)) {
-                        console.warn(`Air pocket at (${obj.x}, ${obj.y}) missing properties array - skipping`);
-                        return false;
-                    }
-                    
-                    return true;
-                });
-                
-                if (validAirPockets.length < objectLayer.objects.length) {
-                    console.warn(`Filtered out ${objectLayer.objects.length - validAirPockets.length} invalid air pockets`);
-                }
-                
-                // Create air pockets from valid objects - preserve exact property access logic
-                this.airPockets = validAirPockets.map(obj => {
-                    const props = {
-                        x: obj.x,
-                        y: obj.y,
-                        variation: 1,
-                        oxygen: 20,
-                        respawn: 30
-                    };
-
-                    // Extract properties from the object
-                    if (obj.properties) {
-                        obj.properties.forEach(prop => {
-                            if (prop.name === 'variation') {
-                                props.variation = parseInt(prop.value, 10) || 1;
-                            } else if (prop.name === 'oxygen') {
-                                props.oxygen = parseInt(prop.value, 10) || 20;
-                            } else if (prop.name === 'respawn') {
-                                props.respawn = parseInt(prop.value, 10) || 30;
-                            }
+                case 'AirPockets':
+                    console.log('Processing AirPockets layer with air_pocket objects');
+                    // Show details of all objects in this layer
+                    objectLayer.objects.forEach((obj, index) => {
+                        // Convert properties array to object for easier viewing
+                        const props = {};
+                        if (obj.properties && Array.isArray(obj.properties)) {
+                            obj.properties.forEach(prop => {
+                                props[prop.name] = prop.value;
+                            });
+                        } else if (obj.properties) {
+                            Object.assign(props, obj.properties);
+                        }
+                        
+                        console.log(`AirPocket object ${index}:`, {
+                            name: obj.name,
+                            x: obj.x, 
+                            y: obj.y,
+                            properties: props
                         });
+                        
+                        // Fix common naming issues - ensure objects have the right name
+                        if (!obj.name || obj.name === '' || obj.name.toLowerCase() === 'airpocket') {
+                            console.log(`Fixing unnamed air pocket object at (${obj.x}, ${obj.y}) to have name 'air_pocket'`);
+                            obj.name = 'air_pocket';
+                        }
+                    });
+                    
+                    // Count objects with the correct name
+                    const validAirPockets = objectLayer.objects.filter(obj => 
+                        obj.name === 'air_pocket' || 
+                        obj.name.toLowerCase() === 'airpocket' || 
+                        obj.name === ''
+                    );
+                    
+                    console.log(`Found ${validAirPockets.length} objects that could be air_pockets in AirPockets layer`);
+                    
+                    // If we have objects with no name or incorrect names, fix them
+                    if (validAirPockets.length !== objectLayer.objects.length) {
+                        console.log(`Warning: ${objectLayer.objects.length - validAirPockets.length} objects in AirPockets layer are not named 'air_pocket'`);
                     }
-
-                    console.log('Creating air pocket with properties:', props);
-                    return props;
-                });
-                
-                console.log(`Processed ${this.airPockets.length} valid air pockets`);
+                    
+                    // Send air pocket objects to the AirPocketSystem
+                    if (this.scene.airPocketSystem) {
+                        // Add the layer name to each object for filtering
+                        const airPocketObjects = objectLayer.objects.map(obj => ({
+                            ...obj,
+                            layerName: 'AirPockets'
+                        }));
+                        
+                        // Use the specialized method for processing air pockets
+                        this.scene.airPocketSystem.processAirPockets(airPocketObjects);
+                    }
+                    break;
+                    
+                default:
+                    console.log(`Skipping unrecognized layer: ${objectLayer.name}`);
             }
         });
+        
+        // Notify game systems that map objects have been processed
+        this.scene.events.emit('mapObjectsProcessed', this.objectLayers);
     }
     
-    // Add helper method to get object layer
+    /**
+     * Get an object layer by name with exact matching
+     * @param {string} name - The name of the object layer to retrieve
+     * @returns {object|null} The object layer or null if not found
+     */
     getObjectLayer(name) {
+        // First try direct lookup with normalized name
         const normalizedName = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-        return this.objectLayers[normalizedName];
+        
+        if (this.objectLayers[normalizedName]) {
+            return this.objectLayers[normalizedName];
+        }
+        
+        // If direct lookup fails, try to find it in the map objects
+        if (this.map && this.map.objects && this.map.objects.length > 0) {
+            // First look for exact name match (preferred)
+            const exactMatch = this.map.objects.find(layer => layer.name === name);
+            if (exactMatch) {
+                return exactMatch;
+            }
+            
+            // If no exact match, try case-insensitive match
+            const caseInsensitiveMatch = this.map.objects.find(layer => 
+                layer.name.toLowerCase() === name.toLowerCase()
+            );
+            if (caseInsensitiveMatch) {
+                return caseInsensitiveMatch;
+            }
+        }
+        
+        console.warn(`Object layer "${name}" not found`);
+        return null;
     }
     
     // Add the missing setMap method
@@ -711,21 +487,29 @@ export default class TilemapSystem {
                 }
             },
             backgroundSprites: {
-                pattern: /^background_sprites$/i,
+                // Make pattern more flexible to match with or without underscore and case insensitive
+                pattern: /^background[_]?sprites$/i,
                 setup: (layer) => {
                     console.log(`Setting up background sprites layer: ${layer.layer.name}`);
-                    return layer.setDepth(1)
+                    // Make sure the layer is fully visible
+                    return layer.setDepth(10)
                         .setScrollFactor(0.4)
-                        .setScale(1.0);
+                        .setScale(1.0)
+                        .setVisible(true)
+                        .setAlpha(1);
                 }
             },
             midground: {
-                pattern: /^midground/i,
+                // Make sure we catch the exact midground_sprites layer
+                pattern: /^midground[_]?sprites$/i,
                 setup: (layer) => {
-                    console.log(`Setting up midground layer: ${layer.layer.name}`);
-                    return layer.setDepth(2)
+                    console.log(`Setting up midground sprites layer: ${layer.layer.name}`);
+                    // Make sure the layer is fully visible
+                    return layer.setDepth(20)
                         .setScrollFactor(0.8)
-                        .setScale(1.0);
+                        .setScale(1.0)
+                        .setVisible(true)
+                        .setAlpha(1);
                 }
             },
             obstacles: {
@@ -776,18 +560,22 @@ export default class TilemapSystem {
                 pattern: /^foreground/i,
                 setup: (layer) => {
                     console.log(`Setting up foreground layer: ${layer.layer.name}`);
-                    return layer.setDepth(15)
+                    return layer.setDepth(50)
                         .setScrollFactor(1.0)
-                        .setScale(1.0);
+                        .setScale(1.0)
+                        .setVisible(true)
+                        .setAlpha(1);
                 }
             },
             // Default for any unrecognized layer
             default: {
                 setup: (layer) => {
                     console.log(`Setting up generic layer: ${layer.layer.name}`);
-                    return layer.setDepth(1)
+                    return layer.setDepth(30)
                         .setScrollFactor(1.0)
-                        .setScale(1.0);
+                        .setScale(1.0)
+                        .setVisible(true)
+                        .setAlpha(1);
                 }
             }
         };
@@ -850,6 +638,9 @@ export default class TilemapSystem {
             }
         });
         
+        // After successfully creating all layers
+        console.log('All map layers created successfully, emitting tilemapCreated event');
+        this.scene.events.emit('tilemapCreated', this.map);
         return processedLayers;
     }
 
@@ -923,65 +714,103 @@ export default class TilemapSystem {
         return objectData;
     }
 
+    /**
+     * Create an air pocket at the specified location - forwards to AirPocketSystem
+     * @param {number} x - X position
+     * @param {number} y - Y position
+     * @param {Object} properties - Properties for the air pocket
+     * @returns {Object} The created air pocket
+     */
     createAirPocket(x, y, properties) {
         try {
+            console.log(`TilemapSystem.createAirPocket called at (${x}, ${y})`);
+            
             // Default values
             let config = {
                 type: 1,
                 oxygenAmount: 20,
-                respawn: 30 // Default 30 seconds
+                respawnTime: 30000 // in milliseconds
             };
             
-            // Handle properties which can be various formats
+            // Process properties
             if (properties) {
                 if (Array.isArray(properties)) {
-                    // Properties from Tiled come as an array of {name, value} objects
                     properties.forEach(prop => {
                         if (prop.name === 'type' || prop.name === 'variation') {
                             config.type = parseInt(prop.value, 10) || 1;
-                        } 
-                        else if (prop.name === 'oxygen') {
+                        } else if (prop.name === 'oxygen') {
                             config.oxygenAmount = parseInt(prop.value, 10) || 20;
-                        }
-                        else if (prop.name === 'respawn') {
-                            config.respawn = parseInt(prop.value, 10) || 30;
+                        } else if (prop.name === 'respawn') {
+                            config.respawnTime = parseInt(prop.value, 10) * 1000 || 30000;
                         }
                     });
-                }
-                else if (typeof properties === 'object') {
-                    // Direct config object
-                    config.type = properties.type || properties.variation || config.type;
-                    config.oxygenAmount = properties.oxygenAmount || properties.oxygen || config.oxygenAmount;
-                    config.respawn = properties.respawn || config.respawn;
+                } else {
+                    // Handle direct property object
+                    if (properties.type !== undefined) {
+                        config.type = parseInt(properties.type, 10) || 1;
+                    }
+                    if (properties.variation !== undefined) {
+                        config.type = parseInt(properties.variation, 10) || 1;
+                    }
+                    if (properties.oxygen !== undefined) {
+                        config.oxygenAmount = parseInt(properties.oxygen, 10) || 20;
+                    }
+                    if (properties.oxygenAmount !== undefined) {
+                        config.oxygenAmount = parseInt(properties.oxygenAmount, 10) || 20;
+                    }
+                    if (properties.respawn !== undefined) {
+                        config.respawnTime = parseInt(properties.respawn, 10) * 1000 || 30000;
+                    }
+                    if (properties.respawnTime !== undefined) {
+                        config.respawnTime = parseInt(properties.respawnTime, 10) || 30000;
+                    }
                 }
             }
-
-            console.log('Creating air pocket with config:', config);
             
-            // Create the air pocket with the config - IMPORTANT: respawn is in seconds, needs to be converted to ms
-            const airPocket = new AirPocket(
-                this.scene,
-                x, 
-                y,
-                {
-                    type: config.type,
-                    oxygenAmount: config.oxygenAmount,
-                    respawn: config.respawn // This is in seconds, AirPocket will convert to ms
-                }
-            );
+            console.log(`Forwarding air pocket creation to AirPocketSystem with config:`, config);
             
-            // Create sprite and add to group
-            const sprite = airPocket.create();
-            if (sprite) {
-                sprite.airPocketInstance = airPocket;
-                this.setupAirPocketPhysics(sprite);
-                this.group.add(sprite);
+            // Forward to AirPocketSystem if available
+            if (this.scene.airPocketSystem) {
+                return this.scene.airPocketSystem.createAirPocket(x, y, config);
+            } else {
+                console.error('Cannot create air pocket - AirPocketSystem not initialized');
+                return null;
             }
-            
-            return airPocket;
         } catch (error) {
-            console.error('Error creating air pocket:', error);
+            console.error('Error in TilemapSystem.createAirPocket:', error);
             return null;
+        }
+    }
+
+    /**
+     * Check if a position is blocked by an obstacle
+     * @param {number} x - X position to check
+     * @param {number} y - Y position to check
+     * @returns {boolean} True if position is blocked, false otherwise
+     */
+    isPositionBlocked(x, y) {
+        try {
+            // Check if map and layers exist
+            if (!this.map || !this.layers) {
+                console.warn('No map or layers available for collision check');
+                return false;
+            }
+            
+            // Use the Obstacles layer for collision checks
+            const obstaclesLayer = this.layers.Obstacles;
+            if (!obstaclesLayer) {
+                console.warn('No Obstacles layer found for collision check');
+                return false;
+            }
+            
+            // Check if position has a tile in the Obstacles layer
+            const tile = obstaclesLayer.getTileAtWorldXY(x, y);
+            
+            // Returns true if there is a tile (position is blocked)
+            return !!tile;
+        } catch (error) {
+            console.error('Error checking position blocked:', error);
+            return false;
         }
     }
 } 

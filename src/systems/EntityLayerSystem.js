@@ -16,7 +16,7 @@ export default class EntityLayerSystem {
      * Register the default entity processors
      */
     registerDefaultProcessors() {
-        // PlayerSpawn processor - preserving existing functionality
+        // Register default processors for common entity types
         this.registerEntityProcessor('playerspawn', (obj, layer) => {
             if (obj.name?.toLowerCase().includes('player') || 
                 obj.type?.toLowerCase().includes('player') ||
@@ -26,31 +26,80 @@ export default class EntityLayerSystem {
                 console.log('Registered player spawn point:', { x: obj.x, y: obj.y });
             }
         });
-
-        // AirPocket processor
+        
+        // AirPocket processor - fixing to work with the correct key and variation
         this.registerEntityProcessor('airpocket', (obj, layer) => {
-            if (!obj.point) {
-                console.warn(`Air pocket at (${obj.x}, ${obj.y}) is not a point object - skipping`);
+            // Skip if missing coordinates
+            if (obj.x === undefined || obj.y === undefined) {
+                console.warn('Skipping air pocket with undefined coordinates');
                 return;
             }
-
-            const properties = {
-                variation: 1,
-                oxygen: 20,
-                respawn: 30,
-                ...this.extractProperties(obj.properties)
-            };
-
-            if (!this.spawnPoints.has('airPockets')) {
-                this.spawnPoints.set('airPockets', []);
+            
+            // Extract properties
+            let variation = 1;  // Default to variation 1
+            let oxygen = 50;    // Default oxygen amount
+            let respawn = 30;   // Default respawn time (seconds)
+            
+            // Handle properties in array format
+            if (obj.properties && Array.isArray(obj.properties)) {
+                obj.properties.forEach(prop => {
+                    if (prop.name === 'variation' || prop.name === 'type') {
+                        variation = parseInt(prop.value, 10) || 1;
+                    } else if (prop.name === 'oxygen') {
+                        oxygen = parseInt(prop.value, 10) || 50;
+                    } else if (prop.name === 'respawn') {
+                        respawn = parseInt(prop.value, 10) || 30;
+                    }
+                });
+            } 
+            // Handle properties in object format
+            else if (obj.properties && typeof obj.properties === 'object') {
+                if (obj.properties.variation !== undefined) {
+                    variation = parseInt(obj.properties.variation, 10) || 1;
+                }
+                if (obj.properties.type !== undefined) {
+                    variation = parseInt(obj.properties.type, 10) || 1;
+                }
+                if (obj.properties.oxygen !== undefined) {
+                    oxygen = parseInt(obj.properties.oxygen, 10) || 50;
+                }
+                if (obj.properties.respawn !== undefined) {
+                    respawn = parseInt(obj.properties.respawn, 10) || 30;
+                }
             }
             
-            this.spawnPoints.get('airPockets').push({
+            // Validate variation (1-3)
+            variation = Math.max(1, Math.min(3, variation));
+            
+            // Create the AirPocket spawn points collection if it doesn't exist
+            // Use correct casing to match Tiled layer name 'AirPockets'
+            if (!this.spawnPoints.has('AirPockets')) {
+                this.spawnPoints.set('AirPockets', []);
+            }
+            
+            // Check for duplicates before adding
+            const posKey = `${Math.round(obj.x)},${Math.round(obj.y)}`;
+            const existingSpawnPoints = this.spawnPoints.get('AirPockets');
+            const isDuplicate = existingSpawnPoints.some(sp => {
+                const spPosKey = `${Math.round(sp.x)},${Math.round(sp.y)}`;
+                return spPosKey === posKey;
+            });
+            
+            if (isDuplicate) {
+                console.warn(`Skipping duplicate AirPocket at ${posKey}`);
+                return;
+            }
+            
+            // Add a single spawn point with the correct properties
+            console.log(`Adding AirPocket at (${obj.x}, ${obj.y}) with variation=${variation}`);
+            this.spawnPoints.get('AirPockets').push({
                 x: obj.x,
                 y: obj.y,
-                ...properties,
-                active: true,
-                lastSpawnTime: this.scene.time.now
+                width: obj.width || 0,
+                height: obj.height || 0,
+                variation: variation,
+                oxygen: oxygen,
+                respawn: respawn
             });
         });
     }

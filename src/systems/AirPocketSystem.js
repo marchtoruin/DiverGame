@@ -21,7 +21,7 @@ export default class AirPocketSystem {
         this.processedObjectIds = [];
         
         // DEBUGGING: Flag to control debug visualization
-        // Set to false to disable debug markers
+        // CRITICAL: DISABLE debug markers entirely - they cause visual bugs
         this.debugVisualsEnabled = false;
         
         // DEBUGGING: Container for debug visuals
@@ -52,38 +52,90 @@ export default class AirPocketSystem {
      * Initialize the air pocket system
      */
     init() {
-        // console.log('Initializing AirPocketSystem');
-        
         try {
-            // Create debug graphics container if debug is enabled
-            if (this.debugVisualsEnabled) {
-                this.createDebugContainer();
+            // Clear any markers from other systems
+            this.clearTypeMarkers();
+            
+            // Create debug container if needed
+            this.createDebugContainer();
+            
+            // Ensure textures are loaded
+            this.ensureTexturesLoaded();
+            
+            // Clear all air pockets first
+            if (Array.isArray(this.airPockets) && this.airPockets.length > 0) {
+                this.airPockets.forEach(airPocket => {
+                    if (airPocket && airPocket.destroy) {
+                        airPocket.destroy();
+                    }
+                });
+                this.airPockets = [];
+            } else {
+                this.airPockets = [];
             }
             
-            // Get air pockets from the map
-            this.getAirPocketsFromMap();
+            // Create physics group if it doesn't exist yet
+            if (!this.group) {
+                this.group = this.scene.physics.add.group({
+                    allowGravity: false,
+                    immovable: true
+                });
+            }
             
-            // Set up collisions with the obstacles layer
-            this.setupObstacleCollisions();
+            // Check if map is already available
+            let mapAvailable = false;
+            if (this.scene.tilemapSystem && this.scene.tilemapSystem.map && this.scene.tilemapSystem.isMapReady) {
+                this.getAirPocketsFromMap();
+                mapAvailable = true;
+            }
             
-            // Create particle emitters for air pockets
+            // Register for the tilemapCreated event regardless
+            // This ensures we catch maps loaded after our initialization
+            this.scene.events.once('tilemapCreated', (map, mapData) => {
+                // Small delay to ensure map processing is complete
+                this.scene.time.delayedCall(100, () => {
+                    // Try to get air pockets from the map first
+                    this.getAirPocketsFromMap();
+                    
+                    // If no air pockets found and we have access to the raw map data,
+                    // try the direct JSON approach as a fallback
+                    if (this.airPockets.length === 0 && mapData) {
+                        this.createAirPocketsFromLevelData();
+                    }
+                });
+            });
+            
+            // Also listen for the specific object layer event
+            this.scene.events.once('mapObjectsReady', (objectLayers) => {
+                // Check if we have an AirPockets layer in the object layers
+                if (objectLayers && objectLayers.airpockets) {
+                    this.processAirPockets(objectLayers.airpockets.objects);
+                }
+            });
+            
+            // If no map is available yet, also try the direct JSON approach
+            if (!mapAvailable) {
+                this.createAirPocketsFromLevelData();
+            }
+            
+            // Create particle emitters
             this.createParticleEmitters();
             
-            // Set up player overlap if player exists
-            if (this.player) {
-                // console.log('Setting up player overlap with air pockets');
+            // Set up collisions with obstacles
+            this.setupObstacleCollisions();
+            
+            // Try to set up player overlap, but don't fail if player isn't ready
+            if (this.player && this.player.sprite) {
                 this.setupPlayerOverlap(this.player);
             } else {
-                // console.warn('Player not available during init, will setup overlap later');
                 this.pendingOverlapSetup = true;
             }
             
-            // Setup validation timer to ensure air pockets are working
-            this.scene.time.delayedCall(1000, () => {
-                this.validateAirPockets();
-            });
+            // Re-clear type markers after map is loaded to ensure none remain
+            this.clearTypeMarkers();
             
-            // console.log(`AirPocketSystem initialized with ${this.airPockets.length} air pockets`);
+            // Reset validity check timer
+            this.lastValidationTime = this.scene.time.now;
         } catch (error) {
             console.error('Error initializing AirPocketSystem:', error);
         }
@@ -101,7 +153,6 @@ export default class AirPocketSystem {
         
         if (missingTextures.length > 0) {
             console.warn(`Missing required air pocket textures: ${missingTextures.join(', ')}`);
-            console.log('Attempting to load missing air pocket textures...');
             
             // Try loading from base paths if available in the scene
             if (missingTextures.includes('air_pocket1') && !this.scene.textures.exists('air_pocket1')) {
@@ -120,8 +171,6 @@ export default class AirPocketSystem {
             if (this.scene.load.list.size > 0) {
                 this.scene.load.start();
             }
-        } else {
-            console.log('All required air pocket textures are loaded');
         }
     }
 
@@ -267,333 +316,464 @@ export default class AirPocketSystem {
     }
 
     /**
-     * Find and create air pockets from the map
+     * Get air pockets from the map
+     * @returns {Array} Array of air pocket objects
      */
     getAirPocketsFromMap() {
-        // console.log('Finding air pockets in tilemap...');
-        
-        // Initialize the array if it doesn't exist
-        if (!this.airPockets) {
-            this.airPockets = [];
-        } else {
-            // Clear existing air pockets to prevent duplicates
-            this.airPockets.forEach(airPocket => {
-                if (airPocket && airPocket.destroy) {
-                    airPocket.destroy();
-                }
-            });
-            this.airPockets = [];
-        }
-        
-        // Clear the physics group to prevent duplicates
-        if (this.group) {
-            this.group.clear(true, true);
-        }
-        
-        // Skip if no tilemap system is available
-        if (!this.scene.tilemapSystem || !this.scene.tilemapSystem.map) {
-            console.error('No tilemap available to extract air pockets from');
-            return this.airPockets;
-        }
-        
-        const map = this.scene.tilemapSystem.map;
-        
         try {
-            const objectLayerNames = map.getObjectLayerNames();
-            
-            // Clear any existing debug points first
-            if (this.debugVisualsEnabled && this.debugGraphics) {
-                this.debugGraphics.clear();
-                this.clearDebugTexts();
+            // Ensure tilemap system is available
+            if (!this.scene.tilemapSystem) {
+                console.error('TilemapSystem not available for air pocket extraction');
+                return [];
             }
             
-            // First look specifically for the "AirPockets" layer
-            let airPocketsLayer = null;
-            
-            // Try to find the AirPockets layer (case-insensitive)
-            for (const layerName of objectLayerNames) {
-                if (layerName.toLowerCase() === 'airpockets') {
-                    airPocketsLayer = map.getObjectLayer(layerName);
-                    break;
-                }
+            if (!this.scene.tilemapSystem.map) {
+                console.error('No map available in TilemapSystem');
+                return [];
             }
             
-            // If found, process air pockets from this layer
-            if (airPocketsLayer && airPocketsLayer.objects && airPocketsLayer.objects.length > 0) {
-                // Track processed positions to prevent duplicates
-                const processedPositions = new Set();
+            // Try multiple approaches to find air pockets
+            
+            // First try - Check if tilemapSystem.objectLayers has AirPockets
+            if (this.scene.tilemapSystem.objectLayers && 
+               (this.scene.tilemapSystem.objectLayers.airpockets || 
+                this.scene.tilemapSystem.objectLayers.AirPockets)) {
                 
-                for (const obj of airPocketsLayer.objects) {
-                    // Skip if not a point object
-                    if (!obj.point) {
-                        console.warn(`Air pocket at (${obj.x}, ${obj.y}) is not a point object - skipping`);
-                        continue;
-                    }
-                    
-                    // Skip if not named "air_pocket"
-                    if (obj.name !== "air_pocket") {
-                        console.warn(`Object at (${obj.x}, ${obj.y}) is not named "air_pocket" - skipping`);
-                        continue;
-                    }
-                    
-                    // Skip if we've already processed an air pocket at this position
-                    const posKey = `${Math.round(obj.x)},${Math.round(obj.y)}`;
-                    if (processedPositions.has(posKey)) {
-                        console.warn(`Skipping duplicate air pocket at (${obj.x}, ${obj.y})`);
-                        continue;
-                    }
-                    
-                    // Extract properties
-                    let variation = 1;
-                    let oxygenAmount = null;
-                    let respawnTime = null;
-                    
-                    // Check for properties on the object
-                    if (obj.properties && Array.isArray(obj.properties)) {
-                        obj.properties.forEach(prop => {
-                            if (prop.name === 'variation') {
-                                variation = parseInt(prop.value, 10) || 1;
-                            } else if (prop.name === 'oxygen') {
-                                oxygenAmount = parseInt(prop.value, 10);
-                            } else if (prop.name === 'respawn') {
-                                respawnTime = parseInt(prop.value, 10);
-                            }
-                        });
-                    }
-                    
-                    console.log('Creating air pocket with properties:', {
-                        x: obj.x,
-                        y: obj.y,
-                        variation,
-                        oxygen: oxygenAmount,
-                        respawn: respawnTime
-                    });
-                    
-                    // Create a single air pocket with all properties
-                    const airPocket = this.createAirPocket(obj.x, obj.y, {
-                        type: variation,
-                        oxygenAmount: oxygenAmount,
-                        respawnTime: respawnTime
-                    });
-                    
-                    if (airPocket && airPocket.sprite) {
-                        // Add to the physics group for overlap detection
-                        this.group.add(airPocket.sprite);
-                        // Mark this position as processed
-                        processedPositions.add(posKey);
-                    }
+                const airPocketLayer = this.scene.tilemapSystem.objectLayers.airpockets || 
+                                      this.scene.tilemapSystem.objectLayers.AirPockets;
+                
+                if (airPocketLayer.objects && airPocketLayer.objects.length > 0) {
+                    // Process these objects directly
+                    return this.processDirectAirPocketObjects(airPocketLayer.objects);
                 }
             }
             
-            // If we still don't have any air pockets, create fallback ones
-            if (this.airPockets.length === 0) {
-                console.warn('No air pockets found in map, creating fallback air pockets');
-                this.createFallbackAirPockets();
+            // Second try - Use map.objects array to find AirPockets layer
+            if (this.scene.tilemapSystem.map.objects && this.scene.tilemapSystem.map.objects.length > 0) {
+                // Find the AirPockets layer
+                const airPocketLayer = this.scene.tilemapSystem.map.objects.find(layer => 
+                    layer.name === 'AirPockets' || 
+                    layer.name.toLowerCase() === 'airpockets'
+                );
+                
+                if (airPocketLayer && airPocketLayer.objects && airPocketLayer.objects.length > 0) {
+                    return this.processDirectAirPocketObjects(airPocketLayer.objects);
+                }
             }
             
-            // Set up player overlap if player is already available
-            if (this.player && this.player.sprite) {
-                this.setupPlayerOverlap(this.player);
-            } else {
-                this.pendingOverlapSetup = true;
+            // Third try - If we have direct access to the original map data, use that
+            if (this.scene.tilemapSystem.mapData && this.scene.tilemapSystem.mapData.layers) {
+                // Find the AirPockets layer in the raw map data
+                const airPocketLayer = this.scene.tilemapSystem.mapData.layers.find(layer => 
+                    layer.name === 'AirPockets' || 
+                    layer.name.toLowerCase() === 'airpockets'
+                );
+                
+                if (airPocketLayer && airPocketLayer.objects && airPocketLayer.objects.length > 0) {
+                    return this.processDirectAirPocketObjects(airPocketLayer.objects);
+                }
             }
             
+            // Last resort - Get object layer via getObjectLayer helper
+            if (this.scene.tilemapSystem.getObjectLayer) {
+                const airPocketLayer = this.scene.tilemapSystem.getObjectLayer('AirPockets');
+                
+                if (airPocketLayer && airPocketLayer.objects && airPocketLayer.objects.length > 0) {
+                    // Process the air pockets
+                    return this.processDirectAirPocketObjects(airPocketLayer.objects);
+                }
+            }
+            
+            // If we reach here, we couldn't find any air pockets in the map
+            console.error('Failed to find AirPockets layer in map');
+            return [];
         } catch (error) {
-            console.error('Error processing air pockets from map:', error);
-            this.createFallbackAirPockets();
+            console.error('Error getting air pockets from map:', error);
+            return [];
         }
+    }
+
+    /**
+     * Process air pocket objects from map data directly
+     * @param {Array} objects - Air pocket objects from map
+     * @returns {Array} - Array of created air pockets
+     */
+    processDirectAirPocketObjects(objects) {
+        console.log(`Processing ${objects.length} air pocket objects`);
         
+        let count = 0;
+        // Track positions AND already processed object IDs to prevent duplicates
+        const pocketPositions = new Set(); 
+        const processedIds = new Set();
+        
+        // Process each valid air pocket object
+        objects.forEach(obj => {
+            try {
+                // Skip if we've already processed this object ID
+                if (obj.id && processedIds.has(obj.id)) {
+                    return;
+                }
+                
+                // Skip objects with 'Type' in the name (enemy spawn points)
+                if (obj.name && obj.name.includes('Type')) {
+                    return;
+                }
+                
+                // Accept objects named 'air_pocket' or with no name
+                if (obj.name !== 'air_pocket' && obj.name !== undefined && obj.name !== '') {
+                    return;
+                }
+                
+                // Must have valid position
+                if (obj.x === undefined || obj.y === undefined) {
+                    return;
+                }
+                
+                // Track position to avoid duplicates - use a smaller radius for more precision
+                const posKey = `${Math.round(obj.x)},${Math.round(obj.y)}`;
+                if (pocketPositions.has(posKey)) {
+                    console.warn(`⚠️ DUPLICATE DETECTION: Skipping duplicate air pocket at ${posKey}`);
+                    return;
+                }
+                
+                // Extract properties
+                const props = this.extractProperties(obj);
+                
+                // Create a SINGLE air pocket with the specified variation
+                const pocket = this.createAirPocket(obj.x, obj.y, {
+                    type: props.variation || 1,
+                    oxygenAmount: props.oxygen || 50,
+                    respawnTime: (props.respawn || 30) * 1000 // Convert to milliseconds
+                });
+                
+                if (pocket) {
+                    count++;
+                    pocketPositions.add(posKey);
+                    // Track ID to prevent duplicates
+                    if (obj.id) {
+                        processedIds.add(obj.id);
+                    }
+                }
+            } catch (error) {
+                console.error('Error processing air pocket object:', error);
+            }
+        });
+        
+        console.log(`Created ${count} air pockets from map objects`);
         return this.airPockets;
     }
 
     /**
-     * Create an air pocket from a Tiled object
-     * @param {Object} obj - The Tiled object
-     * @returns {AirPocket} The created air pocket
+     * Extract properties from an object, handling various formats
+     * @param {Object} obj - The object to extract properties from
+     * @returns {Object} - The extracted properties
      */
-    createAirPocketFromObject(obj) {
-        // Skip objects that don't have valid coordinates
-        if (obj.x === undefined || obj.y === undefined) {
-            // console.warn(`Skipping air pocket object with invalid coordinates`);
-            return null;
-        }
+    extractProperties(obj) {
+        const props = {
+            variation: 1,
+            oxygen: 50,
+            respawn: 30
+        };
         
-        // Skip if we've already processed this object (check by ID if available)
-        if (obj.id && this.processedObjectIds && this.processedObjectIds.includes(obj.id)) {
-            // console.log(`Air pocket with ID ${obj.id} already processed, skipping`);
-            return null;
-        }
-        
-        // Only process objects named "air_pocket"
-        if (obj.name !== "air_pocket") {
-            // console.log(`Object is not named "air_pocket", skipping`);
-            return null;
-        }
-        
-        // console.log(`Processing air pocket at (${obj.x}, ${obj.y})`);
-        
-        // Extract variation from properties or use default
-        let variation = 1;
-        let oxygenAmount = null;
-        let respawnTime = null;
-        
-        // Check for properties on the object itself
+        // Handle properties array (Tiled format)
         if (obj.properties && Array.isArray(obj.properties)) {
             obj.properties.forEach(prop => {
-                if (prop.name === 'variation') {
-                    variation = parseInt(prop.value, 10) || 1;
-                } else if (prop.name === 'amount') {
-                    oxygenAmount = parseInt(prop.value, 10);
-                } else if (prop.name === 'respawnTime') {
-                    respawnTime = parseInt(prop.value, 10);
+                // IMPORTANT: variation is just the sprite type (1, 2, or 3)
+                // NOT the number of air pockets to create
+                if (prop.name === 'variation' || prop.name === 'type') {
+                    // Make sure we interpret this as the sprite variation type
+                    const variation = parseInt(prop.value, 10) || 1;
+                    props.variation = variation;
+                } else if (prop.name === 'oxygen') {
+                    props.oxygen = parseInt(prop.value, 10) || 50;
+                } else if (prop.name === 'respawn') {
+                    props.respawn = parseInt(prop.value, 10) || 30;
                 }
             });
+        } 
+        // Handle direct properties object
+        else if (obj.properties && typeof obj.properties === 'object') {
+            if (obj.properties.variation !== undefined) {
+                props.variation = parseInt(obj.properties.variation, 10) || 1;
+            }
+            if (obj.properties.type !== undefined) {
+                props.variation = parseInt(obj.properties.type, 10) || 1;
+            }
+            if (obj.properties.oxygen !== undefined) {
+                props.oxygen = parseInt(obj.properties.oxygen, 10) || 50;
+            }
+            if (obj.properties.respawn !== undefined) {
+                props.respawn = parseInt(obj.properties.respawn, 10) || 30;
+            }
         }
         
-        // Ensure variation is valid (1-3)
-        variation = Math.max(1, Math.min(3, variation));
+        // Validate variation is between 1-3 (we only have 3 air pocket types)
+        props.variation = Math.max(1, Math.min(3, props.variation));
         
-        // console.log(`Creating air pocket at (${obj.x}, ${obj.y}) with variation ${variation}`);
+        return props;
+    }
 
-        // Create the air pocket
-        const airPocket = this.createAirPocket(
-            obj.x,
-            obj.y,
-            {
-                type: variation,
-                oxygenAmount: oxygenAmount
-            },
-            respawnTime
-        );
-        
-        if (airPocket) {
-            // Mark as processed
-            if (!this.processedObjectIds) {
-                this.processedObjectIds = [];
+    /**
+     * Create an air pocket from a map object
+     * @param {Object} obj - The map object
+     * @returns {Object} The created air pocket
+     */
+    createAirPocketFromObject(obj) {
+        try {
+            // Skip if already processed
+            if (this.processedObjectIds.includes(obj.id)) {
+                console.log(`Air pocket at (${obj.x}, ${obj.y}) already processed`);
+                return null;
             }
+            
+            // Skip any object containing 'Type' in name as these are enemy spawn points
+            if (obj.name && obj.name.includes('Type')) {
+                console.log(`Skipping object with Type in name: ${obj.name}`);
+                return null;
+            }
+            
+            // Skip if not named 'air_pocket'
+            if (obj.name !== 'air_pocket') {
+                console.log(`Skipping object not named 'air_pocket': ${obj.name}`);
+                return null;
+            }
+            
+            console.log(`Creating air pocket from object at (${obj.x}, ${obj.y})`);
+            
+            // Extract properties from the object
+            let variation = 1;
+            let oxygenAmount = 20;
+            let respawnTime = 30; // in seconds
+            
+            // Handle Tiled properties (array of {name, value} objects)
+            if (obj.properties && Array.isArray(obj.properties)) {
+                // Extract values from properties array
+                obj.properties.forEach(prop => {
+                    if (prop.name === 'variation') {
+                        variation = parseInt(prop.value, 10) || 1;
+                    } else if (prop.name === 'oxygen') {
+                        oxygenAmount = parseInt(prop.value, 10) || 20;
+                    } else if (prop.name === 'respawn') {
+                        respawnTime = parseInt(prop.value, 10) || 30;
+                    }
+                });
+            } 
+            // Handle direct object properties
+            else if (obj.properties && typeof obj.properties === 'object') {
+                variation = obj.properties.variation || 1;
+                oxygenAmount = obj.properties.oxygen || 20;
+                respawnTime = obj.properties.respawn || 30;
+            }
+            
+            console.log(`Creating air pocket with properties: variation=${variation}, oxygen=${oxygenAmount}, respawn=${respawnTime}s`);
+            
+            // Create the air pocket
+            const airPocket = this.createAirPocket(
+                obj.x, 
+                obj.y, 
+                {
+                    type: variation,
+                    oxygenAmount: oxygenAmount,
+                    respawnTime: respawnTime * 1000 // Convert to milliseconds
+                }
+            );
+            
+            // Mark as processed
             if (obj.id) {
                 this.processedObjectIds.push(obj.id);
             }
             
-            // console.log(`Successfully created air pocket at (${obj.x}, ${obj.y})`);
-        return airPocket;
+            return airPocket;
+        } catch (error) {
+            console.error('Error creating air pocket from object:', error);
+            return null;
         }
-        
-        return null;
     }
 
     /**
-     * Create an air pocket at the specified position
+     * Create an air pocket at the specified location
      * @param {number} x - X position
-     * @param {number} y - Y position
-     * @param {Array|Object|number} properties - Can be properties array from Tiled, a simple type value, or explicit variation
-     * @param {number} [explicitAmount] - Optional explicit amount (overrides properties)
-     * @param {number} [explicitRespawnTime] - Optional explicit respawn time (overrides properties)
-     * @returns {AirPocket} The created air pocket
+     * @param {number} y - Y position 
+     * @param {Object} config - Configuration for the air pocket
+     * @returns {Object} The created air pocket
      */
-    createAirPocket(x, y, properties, explicitAmount, explicitRespawnTime) {
+    createAirPocket(x, y, config = {}) {
+        // Validate inputs
+        if (x === undefined || y === undefined) {
+            console.error('Cannot create air pocket: coordinates undefined');
+            return null;
+        }
+        
         try {
-            // Default values
-            let config = {
-                type: 1,
-                oxygenAmount: 20,
-                respawnTime: 15000
+            // Set defaults and normalize config
+            const options = {
+                type: parseInt(config.type, 10) || 1,
+                oxygenAmount: parseInt(config.oxygenAmount, 10) || 50,
+                respawnTime: parseInt(config.respawnTime, 10) || 30000,
+                ...config
             };
             
-            // Log the incoming parameters for debugging
-            /* 
-            console.log('Air pocket creation parameters:', { 
-                x, 
-                y, 
-                properties, 
-                explicitAmount, 
-                explicitRespawnTime 
-            });
-            */
+            // Ensure type is valid (1-3)
+            options.type = Math.max(1, Math.min(3, options.type));
             
-            // Handle explicit parameters first if provided
-            if (explicitAmount !== undefined && explicitAmount !== null) {
-                config.oxygenAmount = parseInt(explicitAmount, 10) || 20;
-            }
+            // Create sprite based on type
+            const textureKey = `air_pocket${options.type}`;
             
-            if (explicitRespawnTime !== undefined && explicitRespawnTime !== null) {
-                config.respawnTime = parseInt(explicitRespawnTime, 10) || 15000;
-            }
-            
-            // Then handle properties which can be various formats
-            if (properties) {
-                if (Array.isArray(properties)) {
-                    // Properties from Tiled come as an array of {name, value} objects
-                    properties.forEach(prop => {
-                        if (prop.name === 'type' || prop.name === 'airType' || prop.name === 'variation') {
-                            config.type = parseInt(prop.value, 10) || 1;
-                        } 
-                        // Only apply these if not explicitly set above
-                        else if ((prop.name === 'amount' || prop.name === 'airAmount' || prop.name === 'oxygenAmount') && explicitAmount === undefined) {
-                            config.oxygenAmount = parseInt(prop.value, 10) || 20;
-                        }
-                        else if ((prop.name === 'respawnTime' || prop.name === 'respawnDelay') && explicitRespawnTime === undefined) {
-                            config.respawnTime = parseInt(prop.value, 10) || 15000;
-                        }
-                    });
-                }
-                else if (typeof properties === 'object' && !Array.isArray(properties)) {
-                    // Direct config object with properties
-                    config.type = properties.type || properties.variation || config.type;
-                    
-                    // Only apply these if not explicitly set
-                    if (explicitAmount === undefined) {
-                        config.oxygenAmount = properties.oxygenAmount || properties.amount || config.oxygenAmount;
-                    }
-                    
-                    if (explicitRespawnTime === undefined) {
-                        config.respawnTime = properties.respawnTime || properties.respawn || config.respawnTime;
-                    }
-                }
-                else if (typeof properties === 'number') {
-                    // Simple variation number
-                    config.type = properties;
-                }
-            }
-            
-            // Limit type to valid range 1-3
-            config.type = Math.max(1, Math.min(3, config.type || 1));
-            
-            // Create the air pocket
-            const airPocket = new AirPocket(
-                this.scene,
-                x, 
-                y,
-                {
-                    type: config.type,
-                    oxygenAmount: config.oxygenAmount,
-                    respawnTime: config.respawnTime
-                }
-            );
-            
-            // Create sprite and add to group
-            const sprite = airPocket.create();
-            if (sprite) {
-                // IMPORTANT: Store a reference to the AirPocket instance on the sprite
-                // This fixes the 'markForRespawn is not a function' error
-                sprite.airPocketInstance = airPocket;
+            // Check if texture exists
+            if (!this.scene.textures.exists(textureKey)) {
+                console.error(`Texture ${textureKey} does not exist!`);
                 
-                // Set up the physics for the air pocket
-                this.setupAirPocketPhysics(sprite);
+                // Try fallback to air_pocket1 if available
+                if (this.scene.textures.exists('air_pocket1')) {
+                    const sprite = this.scene.physics.add.sprite(x, y, 'air_pocket1');
+                    return this.finalizeAirPocket(x, y, sprite, options);
+                }
                 
-                // Add to our physics group
+                return null;
+            }
+            
+            // Create a SINGLE sprite (not multiple based on type value)
+            const sprite = this.scene.physics.add.sprite(x, y, textureKey);
+            
+            // Skip if sprite creation failed
+            if (!sprite) {
+                console.error('Failed to create sprite for air pocket');
+                return null;
+            }
+            
+            return this.finalizeAirPocket(x, y, sprite, options);
+        } catch (error) {
+            console.error(`Error creating air pocket at (${x}, ${y}):`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Finalize air pocket creation with common setup
+     * @param {number} x - X position
+     * @param {number} y - Y position
+     * @param {Phaser.GameObjects.Sprite} sprite - The sprite object
+     * @param {Object} options - Configuration options
+     * @returns {Object} The completed air pocket object
+     */
+    finalizeAirPocket(x, y, sprite, options) {
+        try {
+            // Configure sprite
+            sprite.setOrigin(0.5, 0.5);
+            sprite.setScale(0.2); // Increased from 0.02 (10x larger)
+            sprite.setDepth(25); // Above obstacles, below player
+            
+            // Add to physics group for collisions
+            if (this.group) {
                 this.group.add(sprite);
+            } else {
+                console.warn('Physics group not available for air pocket');
             }
             
-            // Add to our collection
-            this.airPockets.push(airPocket);
+            // Add properties to sprite
+            const airPocket = {
+                x,
+                y,
+                sprite,
+                type: options.type,
+                oxygenAmount: options.oxygenAmount,
+                respawnTime: options.respawnTime,
+                lastCollectTime: 0,
+                active: true,
+                isDestroyed: false,
+                hasCollided: false,
+                particles: null
+            };
             
-            // console.log(`Created air pocket at (${x}, ${y}) with type ${config.type}, oxygen amount ${config.oxygenAmount}`);
+            // Store reference to air pocket on sprite for collision handler
+            sprite.airPocketInstance = airPocket;
+            
+            // Add visual effects with adjusted scale values
+            this.addVisualEffects(airPocket);
+            
+            // Add to air pockets array
+            this.airPockets.push(airPocket);
             
             return airPocket;
         } catch (error) {
-            console.error('Error creating air pocket:', error);
+            console.error('Error finalizing air pocket:', error);
             return null;
+        }
+    }
+
+    /**
+     * Add visual effects to the air pocket
+     * @param {Object} airPocket - The air pocket object
+     */
+    addVisualEffects(airPocket) {
+        if (!airPocket || !airPocket.sprite) return;
+        
+        try {
+            // Add blue glow effect
+            const glowFX = airPocket.sprite.preFX.addGlow();
+            glowFX.color = 0x00ffff;  // Cyan/blue color
+            glowFX.outerStrength = 2;  // Outer glow intensity
+            glowFX.innerStrength = 1;  // Inner glow intensity
+
+            // Add a subtle pulsing effect to make the air pocket more noticeable
+            this.scene.tweens.add({
+                targets: airPocket.sprite,
+                scale: { from: 0.2, to: 0.22 },
+                alpha: { from: 0.9, to: 1 },
+                duration: 1500,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+
+            // Add a pulsing glow effect
+            this.scene.tweens.add({
+                targets: glowFX,
+                outerStrength: { from: 2, to: 4 },
+                duration: 1200,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+            
+            // Add a slight rotation for visual interest
+            this.scene.tweens.add({
+                targets: airPocket.sprite,
+                angle: { from: -2, to: 2 },
+                duration: 2000,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+            
+            // Set up physics for buoyancy and collision
+            this.setupAirPocketPhysics(airPocket.sprite);
+            
+            // Add bubble particle effect for all air pockets
+            if (this.scene.add.particles) {
+                // Create small bubble particles around the air pocket
+                const bubbleEmitter = this.scene.add.particles(0, 0, 'bubble', {
+                    follow: airPocket.sprite,  // Follow the sprite instead of static position
+                    followOffset: { x: 0, y: 0 },
+                    lifespan: 2500,
+                    gravityY: -100,
+                    speed: { min: 80, max: 120 },
+                    scale: { start: 0.2, end: 0.1 },
+                    alpha: { start: 0.6, end: 0 },
+                    angle: { min: 265, max: 275 },
+                    frequency: 120,
+                    emitZone: { 
+                        type: 'random',
+                        source: new Phaser.Geom.Circle(0, 0, 25)
+                    },
+                    quantity: 1
+                }).setDepth(2);
+
+                // Store the emitter reference on the air pocket
+                airPocket.particles = bubbleEmitter;
+            }
+        } catch (error) {
+            console.error('Error adding visual effects to air pocket:', error);
         }
     }
 
@@ -603,7 +783,6 @@ export default class AirPocketSystem {
      */
     setupAirPocketPhysics(sprite) {
         if (!sprite || !sprite.body) {
-            // console.warn('Cannot setup physics - air pocket sprite has no physics body');
             return;
         }
         
@@ -663,9 +842,6 @@ export default class AirPocketSystem {
                 loop: true
             });
         }
-        
-        // Log physics setup
-        // console.log(`Air pocket physics configured: velocity.y=${sprite.body.velocity.y}, immovable=${sprite.body.immovable}`);
     }
 
     /**
@@ -798,29 +974,77 @@ export default class AirPocketSystem {
                     instance.updateTimer = null;
                 }
                 
-                // Use the instance's deactivate method - this is for collection by player
-                instance.deactivate();
+                // Destroy the particle emitter if it exists
+                if (instance.particles) {
+                    instance.particles.destroy();
+                    instance.particles = null;
+                }
                 
-                // console.log(`Air pocket at (${instance.x}, ${instance.y}) removed due to player collection`);
+                // Check if deactivate method exists before calling it
+                if (typeof instance.deactivate === 'function') {
+                    instance.deactivate();
+                } else {
+                    // Fallback implementation if deactivate doesn't exist
+                    instance.active = false;
+                    instance.isDestroyed = true;
+                    
+                    if (instance.sprite) {
+                        instance.sprite.setVisible(false);
+                        if (instance.sprite.body) {
+                            instance.sprite.body.enable = false;
+                        }
+                    }
+                    
+                    // Start respawn timer
+                    if (this.scene) {
+                        console.log(`Starting respawn timer for ${instance.respawnTime/1000 || 30} seconds`);
+                        instance.respawnTimer = this.scene.time.delayedCall(instance.respawnTime || 30000, () => {
+                            if (instance.respawn && typeof instance.respawn === 'function') {
+                                instance.respawn();
+                            } else {
+                                // Handle case where respawn doesn't exist
+                                this.respawnAirPocket(instance);
+                            }
+                        });
+                    }
+                }
             } else {
                 // Fallback for direct sprite handling
                 if (airPocket && typeof airPocket.setVisible === 'function') {
-                airPocket.setVisible(false);
+                    airPocket.setVisible(false);
                 }
                 
                 if (airPocket && airPocket.body) {
                     airPocket.body.enable = false;
                 }
-                
-                // console.log(`Air pocket removed (no instance reference)`);
             }
-            
-            // Note: We don't actually remove the sprite from the group 
-            // since we're going to respawn it later
             
         } catch (error) {
             console.error('Error removing air pocket:', error);
         }
+    }
+
+    /**
+     * Respawn an air pocket (helper for removeAirPocket fallback)
+     * @param {Object} instance - The air pocket instance to respawn
+     */
+    respawnAirPocket(instance) {
+        if (!instance) return;
+        
+        instance.active = true;
+        instance.isDestroyed = false;
+        
+        if (instance.sprite) {
+            instance.sprite.setVisible(true);
+            if (instance.sprite.body) {
+                instance.sprite.body.enable = true;
+            }
+            
+            // Recreate the visual effects including particles
+            this.addVisualEffects(instance);
+        }
+        
+        console.log(`Air pocket at (${instance.x}, ${instance.y}) respawned`);
     }
 
     /**
@@ -940,20 +1164,13 @@ export default class AirPocketSystem {
         }
         this.lastValidationTime = now;
         
-        // console.log('Validating air pocket system...');
+        console.log('Validating air pocket system...');
         
         // Check if we have any air pockets
         if (!this.airPockets || this.airPockets.length === 0) {
-            // console.warn('No air pockets found during validation');
-            
-            // Try to get air pockets from the map again
-            this.getAirPocketsFromMap();
-            
-            // If still no air pockets, create some fallback ones
-            if (!this.airPockets || this.airPockets.length === 0) {
-                // console.log('Creating fallback air pockets during validation');
-                this.createFallbackAirPockets();
-            }
+            console.warn('No air pockets found during validation - NONE WILL BE CREATED');
+            console.warn('Air pockets must be defined in the map in the "AirPockets" layer');
+            return;
         }
         
         // Count active vs inactive air pockets
@@ -973,7 +1190,7 @@ export default class AirPocketSystem {
             
             // CRITICAL: Ensure air pockets that collided with obstacles remain active
             if (airPocket.hasCollided && !airPocket.active) {
-                // console.log(`Reactivating air pocket at (${airPocket.x}, ${airPocket.y}) that was incorrectly deactivated`);
+                console.log(`Reactivating air pocket at (${airPocket.x}, ${airPocket.y}) that was incorrectly deactivated`);
                 airPocket.active = true;
                 fixedCount++;
             }
@@ -1003,97 +1220,20 @@ export default class AirPocketSystem {
         }
         
         if (fixedCount > 0) {
-            // console.log(`Fixed ${fixedCount} air pockets with issues`);
+            console.log(`Fixed ${fixedCount} air pockets with issues`);
         }
         
-        // console.log(`Air pocket status: ${activeCount} active, ${inactiveCount} inactive`);
-        
-        // Make sure the group contains all active air pockets
-        if (this.group) {
-            // Remove any sprites from the group that shouldn't be there
-            const currentChildren = this.group.getChildren();
-            for (let i = 0; i < currentChildren.length; i++) {
-                const sprite = currentChildren[i];
-                const instance = sprite.airPocketInstance;
-                
-                // Remove from group if:
-                // 1. It has no instance reference, OR
-                // 2. The instance is marked as destroyed
-                if (!instance || instance.isDestroyed) {
-                    this.group.remove(sprite, false, false);
-                }
-            }
-            
-            // Add any active sprites that should be in the group
-            let addedCount = 0;
-            this.airPockets.forEach(airPocket => {
-                if (airPocket && airPocket.active && !airPocket.isDestroyed && airPocket.sprite) {
-                    // Only add if not already in the group
-                    if (!this.group.contains(airPocket.sprite)) {
-                        this.group.add(airPocket.sprite);
-                        addedCount++;
-                    }
-                }
-            });
-            
-            if (addedCount > 0) {
-                // console.log(`Added ${addedCount} missing air pockets to the physics group`);
-            }
-            
-            // console.log(`Physics group now contains ${this.group.getLength()} air pockets`);
-        }
-        
-        // Ensure player overlap is set up
-        if (this.pendingOverlapSetup && this.player) {
-            // console.log('Setting up pending player-air pocket overlap');
-            this.setupPlayerOverlap(this.player);
-            this.pendingOverlapSetup = false;
-        }
-        
-        // console.log('Air pocket validation complete');
+        console.log(`Air pocket status: ${activeCount} active, ${inactiveCount} inactive`);
     }
 
     /**
      * Create fallback air pockets in case none were found in the map
+     * THIS METHOD IS DISABLED - NO FALLBACKS SHOULD BE CREATED
      */
     createFallbackAirPockets() {
-        // Only create fallbacks if we have no existing air pockets
-        if (this.airPockets && this.airPockets.length > 0) {
-            // console.log('Skipping fallback creation - air pockets already exist');
-            return;
-        }
-        
-        // console.log('Creating fallback air pockets');
-        // console.log('==== FALLBACK AIR POCKET DEBUG ====');
-        
-        // Create some air pockets at fixed positions
-        const fallbackPositions = [
-            { x: 300, y: 200, type: 1, oxygen: 20 },
-            { x: 600, y: 400, type: 2, oxygen: 35 },
-            { x: 900, y: 600, type: 3, oxygen: 50 },
-            { x: 1200, y: 300, type: 1, oxygen: 20 },
-            { x: 400, y: 700, type: 2, oxygen: 35 }
-        ];
-        
-        // Create air pockets at these positions
-        fallbackPositions.forEach(pos => {
-            // DEBUGGING: Log detailed information
-            // console.log(`[DEBUG] Fallback Air Pocket at (${pos.x}, ${pos.y}): Variation=${pos.type}, Oxygen=${pos.oxygen}`);
-            
-            // DEBUGGING: Create visual indicator
-            if (this.debugVisualsEnabled) {
-                this.createDebugMarker(pos.x, pos.y, pos.type, pos.oxygen, pos.respawnTime, true);
-            }
-            
-            this.createAirPocket(pos.x, pos.y, {
-                type: pos.type,
-                oxygenAmount: pos.oxygen,
-                respawnTime: pos.respawnTime ? pos.respawnTime * 1000 : undefined
-            });
-        });
-        
-        // console.log(`Created ${fallbackPositions.length} fallback air pockets`);
-        // console.log('==== END FALLBACK AIR POCKET DEBUG ====');
+        // CRITICAL: NEVER create fallback air pockets - they should only come from map data
+        console.log('Fallback air pocket creation DISABLED - will NOT create any fallbacks');
+        return; // Immediately return without creating any air pockets
     }
 
     /**
@@ -1303,6 +1443,48 @@ export default class AirPocketSystem {
      * @param {boolean} isFallback - Whether this is a fallback air pocket
      */
     createDebugMarker(x, y, variation, oxygen, respawnTime, isFallback = false) {
+        // CRITICAL: IMMEDIATELY return - debug visualization is disabled
+        return;
+        
+        // Even if somehow code execution continues, the below checks should catch Type objects
+        
+        // CRITICAL: SKIP ANY TYPE OBJECTS - these are enemy spawn points
+        // Never create debug markers for Type objects under any circumstances
+        if (variation && typeof variation === 'string' && variation.includes('Type')) {
+            console.log(`Skipping debug marker for Type variation at (${x}, ${y})`);
+            return;
+        }
+        
+        // Also check scene objects for Type in name
+        if (this.scene.gameObjects && this.scene.gameObjects.length > 0) {
+            // Check if there's any object at this position with 'Type' in the name
+            const typeObject = this.scene.gameObjects.find(obj => 
+                obj.x === x && obj.y === y && 
+                obj.name && obj.name.includes('Type')
+            );
+            
+            if (typeObject) {
+                console.log(`Skipping debug marker for Type object at (${x}, ${y})`);
+                return;
+            }
+        }
+        
+        // Skip if debug visuals are disabled to avoid creating useless graphics
+        if (!this.debugVisualsEnabled) {
+            return;
+        }
+        
+        // Check for enemy spawn locations
+        if (this.scene.enemySpawnLocations && this.scene.enemySpawnLocations.length > 0) {
+            const isEnemyLocation = this.scene.enemySpawnLocations.some(loc => 
+                Math.abs(loc.x - x) < 20 && Math.abs(loc.y - y) < 20
+            );
+            if (isEnemyLocation) {
+                console.log(`Skipping debug marker for enemy spawn location at (${x}, ${y})`);
+                return;
+            }
+        }
+        
         if (!this.debugGraphics) {
             this.debugGraphics = this.scene.add.graphics();
             this.debugGraphics.setDepth(1000);
@@ -1336,8 +1518,8 @@ export default class AirPocketSystem {
         
         // Add detailed text label showing all properties with color coding
         const labelText = [
-            `\u{1F3C1} Type: ${variation}`, // Flag emoji
             `\u{1F4A1} O₂: ${oxygen || 'default'}`, // Light bulb emoji
+            `\u{1F3C1} Type: ${variation}`, // Flag emoji
             `\u{23F3} Respawn: ${respawnTime || 'default'}s` // Hourglass emoji
         ].join('\n');
         
@@ -1480,6 +1662,206 @@ export default class AirPocketSystem {
         } catch (error) {
             console.error('Error registering air pocket:', error);
             return null;
+        }
+    }
+
+    /**
+     * Clear any markers for objects with "Type" in their name 
+     */
+    clearTypeMarkers() {
+        // Skip if no debug texts
+        if (!this.debugTexts || this.debugTexts.length === 0) {
+            return;
+        }
+        
+        console.log('Clearing any Type markers that might be displayed as air pockets');
+        
+        // Find and destroy any debug texts containing "Type" in their text
+        let removed = 0;
+        
+        this.debugTexts = this.debugTexts.filter(text => {
+            if (text && text.text && text.text.includes('Type')) {
+                text.destroy();
+                removed++;
+                return false;
+            }
+            return true;
+        });
+        
+        if (removed > 0) {
+            console.log(`Removed ${removed} Type markers from air pocket system`);
+        }
+    }
+
+    /**
+     * Process air pockets from the map
+     * @param {Array} objects - Array of objects from the map
+     */
+    processAirPockets(objects) {
+        // Skip if no objects provided
+        if (!objects || !Array.isArray(objects)) return;
+        
+        // Clear any existing air pockets first
+        this.airPockets = [];
+        this.processedObjectIds = [];
+        
+        // Only process objects that:
+        // 1. Come from the AirPockets layer
+        // 2. Have valid coordinates
+        // 3. Are not enemy spawn points (no "Type" in name)
+        
+        const validAirPocketObjects = objects.filter(obj => {
+            // Skip any objects with "Type" in the name or from Lighting layer
+            if (obj.name && obj.name.includes('Type')) {
+                return false;
+            }
+            
+            // Skip any objects from the Lighting layer (check layerName if available)
+            if (obj.layerName && 
+                (obj.layerName === 'Lighting' || 
+                 obj.layerName === 'lighting' || 
+                 obj.layerName.toLowerCase().includes('lighting'))) {
+                return false;
+            }
+            
+            // Skip if object doesn't have coordinates
+            if (obj.x === undefined || obj.y === undefined) {
+                return false;
+            }
+            
+            // LOOSER NAME REQUIREMENTS:
+            // If object is in AirPockets layer, accept:
+            // - any object named 'air_pocket' 
+            // - any object named 'airpocket' (no underscore)
+            // - any unnamed object (empty name)
+            if (obj.layerName === 'AirPockets') {
+                if (!obj.name || obj.name === '' || 
+                    obj.name === 'air_pocket' || 
+                    obj.name.toLowerCase() === 'airpocket') {
+                    return true;
+                }
+                return false;
+            }
+            
+            // If not in AirPockets layer, must be explicitly named air_pocket
+            return obj.name === 'air_pocket';
+        });
+        
+        console.log(`Processing ${validAirPocketObjects.length} valid air pocket objects`);
+        
+        // Process only valid air pocket objects
+        validAirPocketObjects.forEach(obj => {
+            try {
+                // Convert properties array to an object
+                const props = {};
+                if (obj.properties && Array.isArray(obj.properties)) {
+                    obj.properties.forEach(prop => {
+                        props[prop.name] = prop.value;
+                    });
+                } else if (obj.properties && typeof obj.properties === 'object') {
+                    Object.assign(props, obj.properties);
+                }
+                
+                // Use default values if properties are missing
+                const oxygen = props.oxygen || 50;
+                const variation = props.variation || 1;
+                const respawn = props.respawn ? props.respawn * 1000 : 30000;
+                
+                // Create the air pocket
+                this.createAirPocket(obj.x, obj.y, {
+                    type: variation,
+                    oxygenAmount: oxygen,
+                    respawnTime: respawn
+                });
+                
+                // Store the ID to prevent duplicate processing
+                if (obj.id) {
+                    this.processedObjectIds.push(obj.id);
+                }
+            } catch (error) {
+                console.error('Error processing air pocket object:', error);
+            }
+        });
+    }
+
+    /**
+     * Directly access and process air pockets from the Tiled map JSON
+     * This should be much simpler as all the needed data is already in the map
+     */
+    createAirPocketsFromLevelData() {
+        try {
+            // First try to get the map instance from tilemapSystem
+            if (this.scene.tilemapSystem && this.scene.tilemapSystem.map) {
+                const map = this.scene.tilemapSystem.map;
+                
+                // Method 1: Try to get object layers through Phaser's TilemapLayer API
+                const airPocketLayer = map.getObjectLayer('AirPockets') || 
+                                     map.getObjectLayer('airpockets');
+                                     
+                if (airPocketLayer && Array.isArray(airPocketLayer.objects)) {
+                    console.log(`Found AirPockets layer with ${airPocketLayer.objects.length} objects`);
+                    return this.processDirectAirPocketObjects(airPocketLayer.objects);
+                }
+                
+                // Method 2: Check if map has objects array
+                if (Array.isArray(map.objects)) {
+                    const airPocketLayerObj = map.objects.find(layer => 
+                        layer.name === 'AirPockets' || 
+                        layer.name.toLowerCase() === 'airpockets'
+                    );
+                    
+                    if (airPocketLayerObj && Array.isArray(airPocketLayerObj.objects)) {
+                        console.log(`Found AirPockets layer with ${airPocketLayerObj.objects.length} objects`);
+                        return this.processDirectAirPocketObjects(airPocketLayerObj.objects);
+                    }
+                }
+                
+                // Method 3: If map has original data available
+                if (map.data && map.data.layers) {
+                    const airPocketDataLayer = map.data.layers.find(layer => 
+                        layer.name === 'AirPockets' || 
+                        layer.name.toLowerCase() === 'airpockets'
+                    );
+                    
+                    if (airPocketDataLayer && Array.isArray(airPocketDataLayer.objects)) {
+                        console.log(`Found AirPockets in map data with ${airPocketDataLayer.objects.length} objects`);
+                        return this.processDirectAirPocketObjects(airPocketDataLayer.objects);
+                    }
+                }
+                
+                // If we got this far, we have a map but couldn't find the AirPockets layer
+                console.warn('Map exists but AirPockets layer not found');
+            }
+            
+            // If we couldn't get air pockets from an existing map,
+            // log the issue without trying complex fallbacks
+            console.warn('No air pockets found in map. Make sure you have an "AirPockets" object layer in Tiled');
+            return false;
+            
+        } catch (error) {
+            console.error('Error getting air pockets from map:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Clear all air pockets from the system
+     */
+    clearAllAirPockets() {
+        if (Array.isArray(this.airPockets) && this.airPockets.length > 0) {
+            this.airPockets.forEach(airPocket => {
+                if (airPocket && airPocket.destroy) {
+                    airPocket.destroy();
+                }
+            });
+            this.airPockets = [];
+        } else {
+            this.airPockets = [];
+        }
+        
+        // Also clear the physics group if it exists
+        if (this.group) {
+            this.group.clear(true, true);
         }
     }
 } 

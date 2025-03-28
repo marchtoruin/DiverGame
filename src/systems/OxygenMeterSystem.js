@@ -15,9 +15,12 @@ export default class OxygenMeterSystem {
         
         // Configuration
         this.width = config.width || 200;
-        this.height = config.height || 40; // Match health bar height
-        this.x = 10;
-        this.y = 10;
+        this.height = config.height || 25; // Reduced height (was 40)
+        
+        // Position oxygen meter directly on top of the health meter in the top-left corner
+        // Add a vertical offset to place it above the health meter with a small gap
+        this.x = 10; // 10px from left edge (same as health meter)
+        this.y = 12; // Slight offset from top edge
         
         // Oxygen values
         this.maxOxygen = config.maxOxygen || OXYGEN.MAX;
@@ -125,8 +128,16 @@ export default class OxygenMeterSystem {
         this.scene.scale.on('resize', this.handleResize, this);
     }
     
+    /**
+     * Handle screen resize events
+     */
     handleResize() {
         if (this.container) {
+            // Keep position fixed at top-left, next to health meter
+            this.x = 10; // Fixed position next to health meter
+            this.y = 10;  // Fixed vertical position
+            
+            // Reposition the container
             this.container.setPosition(this.x, this.y);
             this.container.setScrollFactor(0);
         }

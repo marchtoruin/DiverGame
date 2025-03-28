@@ -65,7 +65,9 @@ export default class AirPocket {
             // Create the sprite based on variation
             const textureKey = `air_pocket${this.variation}`;
             this.sprite = this.scene.add.sprite(this.x, this.y, textureKey);
-            this.sprite.setScale(0.165); // Add back the correct scale
+            
+            // Set an extremely small scale
+            this.sprite.setScale(0.02);  // Drastically reduced scale
             
             // Enable physics
             this.scene.physics.world.enable(this.sprite);
@@ -76,7 +78,9 @@ export default class AirPocket {
             // Set up physics properties
             if (this.sprite.body) {
                 // Set up circular physics body for better interaction
-                const bodyRadius = 40;
+                // Tiny collision radius to match new visual size
+                const bodyRadius = 8;  // Very small collision radius
+                
                 this.sprite.body.setCircle(bodyRadius);
                 
                 // Set the offset to center the collision circle
@@ -101,7 +105,7 @@ export default class AirPocket {
             // Add subtle pulsing animation
             this.scene.tweens.add({
                 targets: this.sprite,
-                scale: this.sprite.scale * 1.1,
+                scale: { from: 0.02, to: 0.022 },  // Very small scale range
                 duration: 1000,
                 yoyo: true,
                 repeat: -1,

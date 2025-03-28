@@ -137,6 +137,13 @@ export default class GameScene extends Phaser.Scene {
             // Load map and tilesets
             this.load.tilemapTiledJSON('level1', level1Data);
             this.load.tilemapTiledJSON('level2', level2Data);
+            
+            // CRITICAL: Also add the raw level data to the json cache for AirPocketSystem
+            if (!this.cache.json.has('level1')) {
+                this.cache.json.add('level1', level1Data);
+                console.log('Added level1 data to json cache for AirPocketSystem');
+            }
+            
             this.load.image('underwater_bg', underwaterBg);
             this.load.image('black_and_blue', blackAndBlueImg);
             this.load.image('rock2', rock2Img);
@@ -250,6 +257,8 @@ export default class GameScene extends Phaser.Scene {
     
     setupSystems() {
         try {
+            console.log('Setting up game systems...');
+            
             // Initialize camera system first
             this.gameSceneCamera = new GameSceneCamera(this);
             
@@ -275,7 +284,9 @@ export default class GameScene extends Phaser.Scene {
             this.airPocketSystem.setDebugVisualsEnabled(true);
             
             // Initialize enemy system
+            console.log('Creating enemy system...');
             this.enemySystem = new EnemySystem(this);
+            console.log('Enemy system created successfully');
             
             // Initialize lighting system
             this.lightingSystem = new LightingSystem(this);
@@ -746,6 +757,15 @@ export default class GameScene extends Phaser.Scene {
         this.touchControlSystem = new TouchControlSystem(this);
         this.touchControlSystem.initialize();
         this.touchControlSystem.setVisible(this.touchControlsEnabled);
+
+        // Add escape key for pause
+        this.input.keyboard.on('keydown-ESC', () => {
+            if (this.gameRunning) {
+                this.pause();
+            } else {
+                this.resume();
+            }
+        });
     }
 
     setupKeyboardControls() {
@@ -1040,34 +1060,20 @@ export default class GameScene extends Phaser.Scene {
         try {
             console.log('GameScene pausing...');
             
-            // Set game state first
+            // Set game state
             this.gameRunning = false;
             
-            // Pause all active systems
-            const systemsToPause = [
-                { system: this.ambientBubbleSystem, name: 'AmbientBubbleSystem' },
-                { system: this.particleSystem, name: 'ParticleSystem' },
-                { system: this.enemySystem, name: 'EnemySystem' },
-                { system: this.bulletSystem, name: 'BulletSystem' },
-                { system: this.audioSystem, name: 'AudioSystem' }
-            ];
+            // Pause physics
+            this.physics.pause();
             
-            systemsToPause.forEach(({ system, name }) => {
-                try {
-                    if (system?.pause) {
-                        system.pause();
-                        console.log(`Paused ${name}`);
-                    }
-                } catch (err) {
-                    console.warn(`Error pausing ${name}:`, err);
-                }
-            });
-            
-            // Pause any active tweens
+            // Pause all tweens
             this.tweens.pauseAll();
             
-            // Call parent pause last
-            super.pause();
+            // Stop any active timers
+            this.time.paused = true;
+            
+            // Pause animations if any are playing
+            this.anims.pauseAll();
             
             console.log('GameScene paused successfully');
         } catch (error) {
@@ -1081,34 +1087,20 @@ export default class GameScene extends Phaser.Scene {
         try {
             console.log('GameScene resuming...');
             
-            // Resume all active systems
-            const systemsToResume = [
-                { system: this.ambientBubbleSystem, name: 'AmbientBubbleSystem' },
-                { system: this.particleSystem, name: 'ParticleSystem' },
-                { system: this.enemySystem, name: 'EnemySystem' },
-                { system: this.bulletSystem, name: 'BulletSystem' },
-                { system: this.audioSystem, name: 'AudioSystem' }
-            ];
-            
-            systemsToResume.forEach(({ system, name }) => {
-                try {
-                    if (system?.resume) {
-                        system.resume();
-                        console.log(`Resumed ${name}`);
-                    }
-                } catch (err) {
-                    console.warn(`Error resuming ${name}:`, err);
-                }
-            });
-            
-            // Resume any paused tweens
-            this.tweens.resumeAll();
-            
-            // Set game state
+            // Set game state first
             this.gameRunning = true;
             
-            // Call parent resume last
-            super.resume();
+            // Resume physics
+            this.physics.resume();
+            
+            // Resume tweens
+            this.tweens.resumeAll();
+            
+            // Resume timers
+            this.time.paused = false;
+            
+            // Resume animations
+            this.anims.resumeAll();
             
             console.log('GameScene resumed successfully');
         } catch (error) {

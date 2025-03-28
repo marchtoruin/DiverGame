@@ -4,36 +4,57 @@ export default class Enemy extends Phaser.GameObjects.Sprite {
     constructor(scene, x, y, texture = 'badFish') {
         super(scene, x, y, texture);
         
+        console.log('Creating new enemy at:', { x, y });
+        
         // Core properties
         this.scene = scene;
         this.health = 200;
         this.maxHealth = 200;
         this.speed = 150;
         this.isAlive = true;
+        this.isAggressive = false;  // New property to track aggressive state
+        this.aggressionTimer = null;  // Timer for aggression duration
+        this.aggressionDuration = 5000;  // 5 seconds of aggression after being hit
+        this.normalSpeed = 150;  // Store normal speed
+        this.aggressiveSpeed = 250;  // Faster speed when aggressive
         
         // Add to scene and enable physics
         scene.add.existing(this);
         scene.physics.add.existing(this);
         
+        console.log('Enemy added to scene with physics');
+        
         // Set depth to be above obstacles (10) but below player (25)
         this.setDepth(20);
         
         // Configure physics body
-        this.body
-            .setCollideWorldBounds(true)
-            .setBounce(1, 1)
-            .setSize(this.width * 0.8, this.height * 0.8)
-            .setImmovable(false);  // Enemies should be movable
+        if (this.body) {
+            this.body
+                .setCollideWorldBounds(true)
+                .setBounce(1, 1)
+                .setSize(this.width * 0.8, this.height * 0.8)
+                .setImmovable(false);  // Enemies should be movable
+            
+            console.log('Enemy physics body configured');
+        } else {
+            console.error('Failed to create physics body for enemy');
+        }
         
         // Add collision with obstacles layer if it exists
         if (scene.tilemapSystem?.layers?.Obstacles) {
             scene.physics.add.collider(this, scene.tilemapSystem.layers.Obstacles);
+            console.log('Added collision with obstacles layer');
+        } else {
+            console.warn('No obstacles layer found for enemy collisions');
         }
         
         // Set initial velocity
         const angle = Phaser.Math.Between(0, 360);
         const velocity = scene.physics.velocityFromAngle(angle, this.speed);
-        this.body.setVelocity(velocity.x, velocity.y);
+        if (this.body) {
+            this.body.setVelocity(velocity.x, velocity.y);
+            console.log('Set initial velocity:', velocity);
+        }
         
         // Add subtle wobble animation
         scene.tweens.add({
@@ -155,12 +176,31 @@ export default class Enemy extends Phaser.GameObjects.Sprite {
             repeat: 1
         });
         
+        // Become aggressive when hit
+        this.becomeAggressive();
+        
         // Update health bar
         this.updateHealthBar();
         
         if (this.health <= 0) {
             this.die();
         }
+    }
+    
+    becomeAggressive() {
+        this.isAggressive = true;
+        this.speed = this.aggressiveSpeed;
+        
+        // Clear existing aggression timer if it exists
+        if (this.aggressionTimer) {
+            this.aggressionTimer.remove();
+        }
+        
+        // Set timer to return to normal behavior
+        this.aggressionTimer = this.scene.time.delayedCall(this.aggressionDuration, () => {
+            this.isAggressive = false;
+            this.speed = this.normalSpeed;
+        });
     }
     
     die() {
@@ -202,22 +242,34 @@ export default class Enemy extends Phaser.GameObjects.Sprite {
     update() {
         if (!this.isAlive) return;
         
+        // Get player reference
+        const player = this.scene.player?.sprite;
+        
+        if (this.isAggressive && player) {
+            // Chase player when aggressive
+            const angle = Phaser.Math.Angle.Between(this.x, this.y, player.x, player.y);
+            const velocity = new Phaser.Math.Vector2();
+            velocity.setToPolar(angle, this.speed);
+            this.body.setVelocity(velocity.x, velocity.y);
+        } else {
+            // Normal movement behavior when not aggressive
+            // Bounce off screen edges with slight randomization
+            if (this.body.blocked.left || this.body.blocked.right) {
+                this.body.velocity.y += Phaser.Math.Between(-50, 50);
+            }
+            if (this.body.blocked.up || this.body.blocked.down) {
+                this.body.velocity.x += Phaser.Math.Between(-50, 50);
+            }
+            
+            // Normalize velocity to maintain constant speed
+            const currentVelocity = new Phaser.Math.Vector2(this.body.velocity.x, this.body.velocity.y);
+            currentVelocity.normalize().scale(this.speed);
+            this.body.setVelocity(currentVelocity.x, currentVelocity.y);
+        }
+        
         // Flip sprite based on movement direction
         this.setFlipX(this.body.velocity.x < 0);
         
-        // Bounce off screen edges with slight randomization
-        if (this.body.blocked.left || this.body.blocked.right) {
-            this.body.velocity.y += Phaser.Math.Between(-50, 50);
-        }
-        if (this.body.blocked.up || this.body.blocked.down) {
-            this.body.velocity.x += Phaser.Math.Between(-50, 50);
-        }
-        
-        // Normalize velocity to maintain constant speed
-        const currentVelocity = new Phaser.Math.Vector2(this.body.velocity.x, this.body.velocity.y);
-        currentVelocity.normalize().scale(this.speed);
-        this.body.setVelocity(currentVelocity.x, currentVelocity.y);
-
         // Update health bar position
         this.updateHealthBar();
     }

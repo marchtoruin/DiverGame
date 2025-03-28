@@ -392,21 +392,19 @@ export default class Player extends Phaser.Events.EventEmitter {
     getBoostDirection(input) {
         let direction = { x: 0, y: 0 };
         
-        // Get direction directly from input - ALWAYS USE CURRENT FRAME'S INPUT
-        // This ensures boost responds immediately to direction changes
+        // Get direction from input
         if (input.left) direction.x = -1;
         else if (input.right) direction.x = 1;
         
         if (input.up) direction.y = -1;
         else if (input.down) direction.y = 1;
         
-        // If no input direction, use player's facing direction
+        // If no input direction, boost upward instead of using facing direction
         if (direction.x === 0 && direction.y === 0) {
-            direction.x = this.sprite.flipX ? -1 : 1;
+            direction.y = -1; // Upward boost
         }
         
         // Normalize direction vector to ensure consistent speed in all directions
-        // This is critical for diagonal movement to maintain the same speed as cardinal directions
         const magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
         if (magnitude > 0 && magnitude !== 1) {
             direction.x /= magnitude;
