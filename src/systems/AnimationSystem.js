@@ -124,15 +124,73 @@ export default class AnimationSystem {
     }
 
     /**
+     * Create the swimming animation for the new spritesheet
+     * @param {Object} options - Optional configuration options for the animation
+     */
+    createNewPlayerSwimAnimation(options = {}) {
+        console.log('Creating new player swim animation...');
+        
+        // Make sure the spritesheet is loaded
+        if (!this.scene.textures.exists(ANIMATIONS.IDLE_SWIM_NEW.TEXTURE_KEY)) {
+            console.error(`Failed to load ${ANIMATIONS.IDLE_SWIM_NEW.TEXTURE_KEY} spritesheet`);
+            return false;
+        }
+
+        try {
+            // Remove existing animation if it exists
+            if (this.scene.anims.exists(ANIMATIONS.IDLE_SWIM_NEW.KEY)) {
+                this.scene.anims.remove(ANIMATIONS.IDLE_SWIM_NEW.KEY);
+                console.log(`Removed existing animation: ${ANIMATIONS.IDLE_SWIM_NEW.KEY}`);
+            }
+            
+            // Default animation options
+            const frameRate = options.frameRate || ANIMATIONS.IDLE_SWIM_NEW.FRAME_RATE;
+            const yoyo = options.yoyo || false; // Whether the animation should play in reverse after completion
+            const repeat = options.repeat !== undefined ? options.repeat : -1; // Default to looping (-1)
+            const frameDelay = options.frameDelay || 0; // Delay between frames for a more deliberate animation
+            const ease = options.ease || 'Sine.easeInOut'; // Add easing function for smoother transitions
+            const blendMode = options.blendMode || Phaser.BlendModes.NORMAL; // Default blend mode
+            const useInterpolation = options.useInterpolation !== undefined ? options.useInterpolation : true; // Enable frame interpolation
+            
+            // Create the animation using the spritesheet with enhanced options
+            this.scene.anims.create({
+                key: ANIMATIONS.IDLE_SWIM_NEW.KEY,
+                frames: this.scene.anims.generateFrameNumbers(ANIMATIONS.IDLE_SWIM_NEW.TEXTURE_KEY, { 
+                    start: 0, 
+                    end: ANIMATIONS.IDLE_SWIM_NEW.FRAMES - 1 
+                }),
+                frameRate: frameRate,
+                yoyo: yoyo,
+                repeat: repeat,
+                delay: frameDelay,
+                // Frame interpolation and blending options
+                ease: ease,
+                blendMode: blendMode,
+                // The number of milliseconds to stay on each frame
+                duration: options.duration, // If provided, this overrides frameRate
+                // Higher sample values can create smoother transitions in some cases
+                sample: options.sample || (useInterpolation ? 2 : 1)
+            });
+            
+            console.log(`Created new animation: ${ANIMATIONS.IDLE_SWIM_NEW.KEY} with ${ANIMATIONS.IDLE_SWIM_NEW.FRAMES} frames at ${frameRate} fps`);
+            console.log(`Animation options: yoyo=${yoyo}, repeat=${repeat}, interpolation=${useInterpolation}, ease=${ease}`);
+            return true;
+        } catch (error) {
+            console.error('Error creating new animation:', error);
+            return false;
+        }
+    }
+
+    /**
      * Create all required animations
      */
     createAnimations() {
         console.log('Creating all animations');
         
-        // Create the swimming animation
-        const animResult = this.createPlayerSwimAnimation('idle_swim_full');
-        console.log(`Animation creation result: ${animResult ? 'Success' : 'Failed'}`);
-        
-        return animResult;
+        // Skip trying to create animations with the new spritesheet
+        // Instead, directly create a placeholder animation
+        console.log('Creating placeholder animation only');
+        this.createPlaceholderAnimation();
+        return true;
     }
 } 

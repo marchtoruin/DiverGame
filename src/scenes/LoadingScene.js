@@ -25,6 +25,13 @@ import heartImg from '../assets/heart.png';
 import badFishImg from '../assets/enemies/badFish01.png';
 import seaweedImg from '../assets/seaweed.png';
 import flashlightCone1Img from '../assets/flashlight_cone1.png';
+import new_idle_swimImg from '../assets/new_idle_swim.png';
+import batteryImg from '../assets/battery.png';
+
+// Import normal maps 
+import black_and_blue_nImg from '../assets/tilesets/normal_maps/black_and_blue_n.png';
+import rock2_nImg from '../assets/tilesets/normal_maps/rock2_n.png';
+import rock3_nImg from '../assets/tilesets/normal_maps/rock3_n.png';
 
 export default class LoadingScene extends Phaser.Scene {
     constructor() {
@@ -67,8 +74,11 @@ export default class LoadingScene extends Phaser.Scene {
             this.load.tilemapTiledJSON('level2', level2Data);
             this.load.image('underwater_bg', underwaterBg);
             this.load.image('black_and_blue', blackAndBlueImg);
+            this.load.image('black_and_blue_n', black_and_blue_nImg);
             this.load.image('rock2', rock2Img);
+            this.load.image('rock2_n', rock2_nImg);
             this.load.image('rock3', rock3Img);
+            this.load.image('rock3_n', rock3_nImg);
             this.load.image('seaweed', seaweedImg);
             this.load.image('air_pocket1', airPocket1Img);
             this.load.image('air_pocket2', airPocket2Img);
@@ -76,8 +86,13 @@ export default class LoadingScene extends Phaser.Scene {
             
             // Load player assets
             this.load.image('player', diverImg);
+            this.load.spritesheet('diver_swim_new', new_idle_swimImg, { 
+                frameWidth: 139, 
+                frameHeight: 150 
+            });
             this.load.image('bubble', bubbleImg);
             this.load.image('heart', heartImg);
+            this.load.image('battery', batteryImg);
             
             // Load enemy assets
             this.load.image('badFish', badFishImg);

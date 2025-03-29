@@ -56,11 +56,11 @@ export default class Player extends Phaser.Events.EventEmitter {
     create() {
         try {
             console.log('Creating player sprite...');
-            // Create the sprite with physics
+            // Create the sprite with physics using the static player texture
             this.sprite = this.scene.physics.add.sprite(
                 this.spawnPoint.x, 
                 this.spawnPoint.y, 
-                'player'
+                'player' // Always use static texture to start
             );
             
             if (!this.sprite) {
@@ -77,7 +77,7 @@ export default class Player extends Phaser.Events.EventEmitter {
                 body.setFriction(PLAYER.FRICTION, PLAYER.FRICTION);
                 body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
                 
-                // Set proper hitbox size and offset
+                // Set proper hitbox size and offset - keep the same physics body size for collision consistency
                 body.setSize(80, 120, true);
                 body.setOffset(5, 5);
                 
@@ -94,7 +94,20 @@ export default class Player extends Phaser.Events.EventEmitter {
             return this.sprite;
         } catch (error) {
             console.error('Error in Player.create():', error);
-            return null;
+            // Fall back to the original sprite if the new one fails
+            this.sprite = this.scene.physics.add.sprite(
+                this.spawnPoint.x, 
+                this.spawnPoint.y, 
+                'player'
+            );
+            
+            if (this.sprite && this.sprite.body) {
+                this.sprite.body.setSize(80, 120, true);
+                this.sprite.body.setOffset(5, 5);
+                this.sprite.body.enable = true;
+            }
+            
+            return this.sprite;
         }
     }
 
@@ -173,12 +186,21 @@ export default class Player extends Phaser.Events.EventEmitter {
             const input = this.getInputState();
             this._inputState = input;
             
+            // Explicitly update sprite orientation based on input
+            if (input.left) {
+                this.sprite.flipX = true;
+            } else if (input.right) {
+                this.sprite.flipX = false;
+            }
+            
             this.updateBoost(delta);
             this.processMovement(input);
             this.updateOxygen(delta);
             
             this.lastPosition = { x: this.sprite.x, y: this.sprite.y };
-        } catch (error) {}
+        } catch (error) {
+            console.error('Error in Player.update:', error);
+        }
     }
 
     /**

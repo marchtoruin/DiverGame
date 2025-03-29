@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="100" height="500" tilewidth="32" tileheight="32" infinite="0" nextlayerid="8" nextobjectid="20">
+<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="100" height="500" tilewidth="32" tileheight="32" infinite="0" nextlayerid="8" nextobjectid="21">
  <editorsettings>
   <export target="../maps/level2.json" format="json"/>
  </editorsettings>
@@ -2130,6 +2130,11 @@
   <object id="19" name="black" x="848" y="10648" width="2392" height="224">
    <properties>
     <property name="type" value="black"/>
+   </properties>
+  </object>
+  <object id="20" name="bright" x="2016" y="3104" width="1120" height="144">
+   <properties>
+    <property name="type" value="bright"/>
    </properties>
   </object>
  </objectgroup>

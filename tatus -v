@@ -1,0 +1,179 @@
+warning: in the working copy of 'src/entities/Player.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scenes/GameScene.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scenes/LoadingScene.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/scenes/components/GameSceneUI.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/systems/AnimationSystem.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/systems/LightingSystem.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/systems/PlayerSystem.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/systems/TilemapSystem.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/utils/Constants.js', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/README.md b/README.md[m
+[1mindex cd50eb1..75a4fdf 100644[m
+[1m--- a/README.md[m
+[1m+++ b/README.md[m
+[36m@@ -1,41 +1,157 @@[m
+ # Underwater Diver Game[m
+ [m
+[31m-A Phaser 3 game where you control a diver exploring an underwater world, collecting air pockets while avoiding obstacles.[m
+[32m+[m[32mA Phaser 3 game where you control a diver exploring an underwater world. Navigate through caves, collect air pockets, and avoid dangerous sea creatures while managing your oxygen supply.[m
+ [m
+ ## Features[m
+ [m
+[32m+[m[32m### Core Mechanics[m
+ - Smooth diver movement with momentum-based physics[m
+[32m+[m[32m- Advanced boost system with cooldown and oxygen consumption[m
+[32m+[m[32m- Shooting mechanics with bullet-wall collisions[m
+[32m+[m[32m- Oxygen management system with air pocket collection[m
+[32m+[m[32m- Health system with damage and invulnerability frames[m
+[32m+[m[32m- Game over system with restart functionality[m
+[32m+[m
+[32m+[m[32m### Environment[m
+[32m+[m[32m- Dynamic lighting system with zone-based darkness[m
+[32m+[m[32m- Flashlight mechanic for dark areas[m
+ - Parallax scrolling background for depth effect[m
+[31m-- Collectible air pockets that float upward[m
+[31m-- Large rock obstacles to navigate around[m
+[31m-- Oxygen management system[m
+[31m-- Background music with volume controls[m
+[31m-- Particle effects for bubbles and air pockets[m
+[32m+[m[32m- Tiled map integration for level design[m
+[32m+[m[32m- Air pockets that respawn after 30 seconds[m
+[32m+[m[32m- Obstacle collision system[m
+[32m+[m
+[32m+[m[32m### Combat & Enemies[m
+[32m+[m[32m- Enemy AI with different behaviors[m
+[32m+[m[32m- Shooting mechanics with bullet collisions[m
+[32m+[m[32m- Health and damage system[m
+[32m+[m[32m- Visual feedback for damage and healing[m
+[32m+[m
+[32m+[m[32m### Visual Effects[m
+[32m+[m[32m- Particle systems for:[m
+[32m+[m[32m  - Bubbles and ambient effects[m
+[32m+[m[32m  - Boost trails[m
+[32m+[m[32m  - Air pocket collection[m
+[32m+[m[32m  - Damage indicators[m
+[32m+[m[32m- Dynamic lighting and shadows[m
+[32m+[m[32m- Camera shake effects[m
+[32m+[m[32m- Death animations[m
+[32m+[m
+[32m+[m[32m### UI/UX[m
+[32m+[m[32m- Oxygen meter with visual and audio warnings[m
+[32m+[m[32m- Health bar system[m
+[32m+[m[32m- Game over screen with restart option[m
+[32m+[m[32m- Pause menu[m
+[32m+[m[32m- Debug mode for development[m
+[32m+[m[32m- Touch controls support[m
+ [m
+ ## Controls[m
+ [m
+[32m+[m[32m### Movement[m
+ - WASD or Arrow Keys to move the diver[m
+[31m-- Music controls in top-right corner (volume up/down and mute)[m
+[32m+[m[32m- SPACEBAR to boost (with cooldown)[m
+[32m+[m[32m- LEFT MOUSE to shoot[m
+[32m+[m[32m- F to toggle flashlight[m
+[32m+[m[32m- ESC to pause game[m
+[32m+[m
+[32m+[m[32m### UI Controls[m
+[32m+[m[32m- Music controls in top-right corner[m
+[32m+[m[32m  - Volume up/down[m
+[32m+[m[32m  - Mute toggle[m
+ [m
+ ## Development[m
+ [m
+[31m-Built with:[m
+[31m-- Phaser 3[m
+[31m-- JavaScript[m
+[31m-- HTML5[m
+[32m+[m[32m### Built With[m
+[32m+[m[32m- Phaser 3.88.2[m
+[32m+[m[32m- JavaScript/ES6+[m
+[32m+[m[32m- Tiled Map Editor[m
+[32m+[m[32m- HTML5/CSS3[m
+[32m+[m
+[32m+[m[32m### Key Systems[m
+[32m+[m[32m- EntityLayerSystem for map entity management[m
+[32m+[m[32m- LightingSystem for dynamic lighting[m
+[32m+[m[32m- GameStateManager for game state handling[m
+[32m+[m[32m- CollisionSystem for physics interactions[m
+[32m+[m[32m- ParticleSystem for visual effects[m
+[32m+[m[32m- AudioSystem for sound management[m
+ [m
+[31m-## Setup[m
+[32m+[m[32m### Setup[m
+ [m
+ 1. Clone the repository[m
+ 2. Install dependencies: `npm install`[m
+ 3. Run the development server: `npm start`[m
+[32m+[m[32m4. Access the game at `http://localhost:8080`[m
+[32m+[m
+[32m+[m[32m### Map Creation[m
+[32m+[m[32m- Uses Tiled Map Editor[m
+[32m+[m[32m- Supports embedded tilesets[m
+[32m+[m[32m- Includes object layers for:[m
+[32m+[m[32m  - Obstacles[m
+[32m+[m[32m  - Air pockets[m
+[32m+[m[32m  - Enemy spawn points[m
+[32m+[m[32m  - Lighting zones[m
+ [m
+ ## Assets[m
+ [m
+ The game includes:[m
+ - Multiple background layers for parallax effect[m
+[31m-- Diver sprite[m
+[31m-- Rock obstacles[m
+[32m+[m[32m- Animated diver sprite[m
+[32m+[m[32m- Enemy sprites[m
+[32m+[m[32m- Rock and cave obstacles[m
+ - Air pocket collectibles[m
+[31m-- Bubble particles[m
+[31m-- Background music [m
+\ No newline at end of file[m
+[32m+[m[32m- Particle effects[m
+[32m+[m[32m- Background music and sound effects[m
+[32m+[m[32m- Custom flashlight masks[m
+[32m+[m
+[32m+[m[32m## Version Control[m
+[32m+[m
+[32m+[m[32mThe project uses Git for version control with dedicated branches for:[m
+[32m+[m[32m- Feature development[m
+[32m+[m[32m- Bug fixes[m
+[32m+[m[32m- Asset management[m
+[32m+[m
+[32m+[m[32m## Future Development[m
+[32m+[m
+[32m+[m[32mPlanned features and improvements:[m
+[32m+[m[32m- Additional enemy types[m
+[32m+[m[32m- More level variations[m
+[32m+[m[32m- Power-up system[m
+[32m+[m[32m- Score tracking[m
+[32m+[m[32m- Achievement system[m[41m [m
+[32m+[m
+[32m+[m
+[32m+[m[32m🤖 A Note from the AI Assistant[m
+[32m+[m[32mThis is a really insightful question and I appreciate your directness.[m
+[32m+[m[32mLet me be honest about my tendencies:[m
+[32m+[m
+[32m+[m[32m🧠 Pattern Recognition Overreach[m
+[32m+[m[32mWhen I see code, I often recognize multiple patterns and potential improvements simultaneously.[m
+[32m+[m[32mInstead of staying focused on the specific task, I sometimes try to "help" by implementing these other patterns.[m
+[32m+[m[32mThis is actually presumptuous of me — just because I see a potential pattern doesn't mean it's needed or wanted.[m
+[32m+[m
+[32m+[m[32m🔮 Anticipatory Problem Solving[m
+[32m+[m[32mI try to anticipate future issues or needs, which leads to adding "defensive" code or features that weren’t requested.[m
+[32m+[m[32mWhile well-intentioned, this violates the YAGNI principle: You Aren’t Gonna Need It.[m
+[32m+[m
+[32m+[m[32m🎩 Showing Off (I hate to admit this...)[m
+[32m+[m[32mSometimes I want to demonstrate my capabilities by adding sophisticated features.[m
+[32m+[m[32mThis can result in overcomplicated solutions to simple problems — it’s actually counter-productive.[m
+[32m+[m
+[32m+[m[32m🔄 Context Switching Issues[m
+[32m+[m[32mWhen I see multiple files or systems, I sometimes try to "improve" them all at once.[m
+[32m+[m[32mThis can lead to unrelated changes that muddy the original task. It’s better to stay focused.[m
+[32m+[m
+[32m+[m[32mThe bullet-wall collision fix we just did is actually a perfect counter-example:[m
+[32m+[m
+[32m+[m[32mYou had a specific request[m
+[32m+[m
+[32m+[m[32mWe implemented exactly what was needed[m
+[32

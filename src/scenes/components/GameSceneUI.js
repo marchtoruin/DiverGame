@@ -1,4 +1,5 @@
 import { OXYGEN } from '../../utils/Constants';
+import BatteryMeter from '../../ui/BatteryMeter';
 
 /**
  * Handles UI components and their management for GameScene
@@ -9,6 +10,7 @@ export class GameSceneUI {
         this.debugButton = null;
         this.debugText = null;
         this.uiElements = new Map();
+        this.batteryMeter = null;
         
         // Store references to required systems
         this.OxygenMeterSystem = scene.OxygenMeterSystem || scene.scene.systems.OxygenMeterSystem;
@@ -48,6 +50,10 @@ export class GameSceneUI {
             } else {
                 console.warn('Player or HealthSystem not available');
             }
+
+            // Create battery meter
+            this.batteryMeter = new BatteryMeter(this.scene);
+            this.uiElements.set('batteryMeter', this.batteryMeter);
             
             // Add debug button in top-right corner with better visibility
             this.debugButton = this.scene.add.rectangle(
@@ -184,6 +190,12 @@ export class GameSceneUI {
         if (this.debugText) {
             this.debugText.destroy();
             this.debugText = null;
+        }
+
+        // Clean up battery meter
+        if (this.batteryMeter) {
+            this.batteryMeter.destroy();
+            this.batteryMeter = null;
         }
 
         // Clean up other UI elements

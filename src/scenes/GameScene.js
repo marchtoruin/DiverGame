@@ -27,7 +27,6 @@ import bgBubble1Img from '../assets/bg_bubble1.png';
 import bgBubble2Img from '../assets/bg_bubble2.png';
 import bgBubble3Img from '../assets/bg_bubble3.png';
 import bulletImg from '../assets/laser_sprites/03.png';
-import idleSwimStrip from '../assets/idle_swim_strip.png';
 import airPocket1Img from '../assets/air_pocket1.png';
 import airPocket2Img from '../assets/air_pocket2.png';
 import airPocket3Img from '../assets/air_pocket3.png';
@@ -37,6 +36,8 @@ import heartImg from '../assets/heart.png';
 import badFishImg from '../assets/enemies/badFish01.png';
 import seaweedImg from '../assets/seaweed.png'; // Add seaweed tileset
 import flashlightCone1Img from '../assets/flashlight_cone1.png'; // Import custom flashlight mask
+import new_idle_swimImg from '../assets/new_idle_swim.png'; // Import new player spritesheet
+import batteryImg from '../assets/battery.png';
 
 // Import systems
 import AnimationSystem from '../systems/AnimationSystem';
@@ -156,6 +157,20 @@ export default class GameScene extends Phaser.Scene {
             
             // Load player assets
             this.load.image('player', diverImg);
+            this.load.image('battery', batteryImg);
+
+            // CRITICAL: Make sure the spritesheet loads BEFORE it's needed
+            // Load with all possible options to avoid frame/dimensions issues
+            console.log('Loading player spritesheet upfront with forced options');
+            this.load.spritesheet('diver_swim_new', new_idle_swimImg, { 
+                frameWidth: 139,
+                frameHeight: 150,
+                startFrame: 0,
+                endFrame: 7,
+                spacing: 0,
+                margin: 0
+            });
+            
             this.load.image('bubble', bubbleImg);
             this.load.image('heart', heartImg);
             
@@ -317,6 +332,9 @@ export default class GameScene extends Phaser.Scene {
             // Set the custom flashlight mask
             this.lightingSystem.setCustomFlashlightMask('flashlight_cone1');
             
+            // Initialize animation system
+            this.animationSystem = new AnimationSystem(this);
+            
             // Initialize UI
             this.gameSceneUI = new GameSceneUI(this);
             
@@ -351,25 +369,46 @@ export default class GameScene extends Phaser.Scene {
                 }
             });
             
-            // Create animations using both methods for redundancy
-            requiredAnimations.forEach(animation => {
-                try {
+            // Create animations using the new method first, then fall back to old method if needed
+            try {
+                // Try the new animation first
+                console.log('Attempting to create animation with new spritesheet...');
+                const animOptions = {
+                    frameRate: 8, // Smoother animation with lower frame rate
+                    yoyo: false, 
+                    frameDelay: 0, 
+                    // Enhanced interpolation options
+                    useInterpolation: true, // Enable frame interpolation
+                    sample: 2, // Higher sample rate for smoother transitions
+                    ease: 'Sine.easeInOut', // Add easing for smoother transitions
+                    blendMode: Phaser.BlendModes.NORMAL
+                };
+                const newSuccess = this.animationSystem.createNewPlayerSwimAnimation(animOptions);
+                
+                if (newSuccess) {
+                    console.log('Successfully created animation with new spritesheet');
+                    requiredAnimations[0].status = true;
+                } else {
+                    // Fall back to original methods if new animation fails
+                    console.warn('Failed to create animation with new spritesheet, falling back to original methods');
+                    
                     // Try specific animation creation first
                     const success = this.animationSystem.createPlayerSwimAnimation('idle_swim_full');
-                    animation.status = this.anims.exists(animation.key);
+                    requiredAnimations[0].status = this.anims.exists(requiredAnimations[0].key);
                     
                     // If specific creation failed, try master method
-                    if (!animation.status) {
-                        console.log(`Specific animation creation failed for ${animation.key}, trying master method...`);
+                    if (!requiredAnimations[0].status) {
+                        console.log(`Specific animation creation failed for ${requiredAnimations[0].key}, trying master method...`);
                         this.animationSystem.createAnimations();
-                        animation.status = this.anims.exists(animation.key);
+                        requiredAnimations[0].status = this.anims.exists(requiredAnimations[0].key);
                     }
-                    
-                    console.log(`Animation ${animation.key} creation ${animation.status ? 'succeeded' : 'failed'}`);
-                } catch (err) {
-                    console.error(`Error creating animation ${animation.key}:`, err);
                 }
-            });
+            } catch (err) {
+                console.error(`Error creating animation:`, err);
+                // Create placeholder animation as last resort
+                this.animationSystem.createPlaceholderAnimation();
+                requiredAnimations[0].status = this.anims.exists(requiredAnimations[0].key);
+            }
             
             // Final verification
             const missingAnimations = requiredAnimations.filter(a => !a.status).map(a => a.key);
@@ -701,72 +740,118 @@ export default class GameScene extends Phaser.Scene {
         try {
             console.log('Setting up player...');
             
-            // Get spawn position
-            let spawnX = 100, spawnY = 100;
-            if (this.playerSpawnPoint) {
-                spawnX = this.playerSpawnPoint.x;
-                spawnY = this.playerSpawnPoint.y;
+            // Use player spawn point from map if available, otherwise use default
+            const spawnX = this.playerSpawnPoint ? this.playerSpawnPoint.x : 400;
+            const spawnY = this.playerSpawnPoint ? this.playerSpawnPoint.y : 300;
+            
+            // Create player system if it doesn't exist
+            if (!this.playerSystem) {
+                this.playerSystem = new PlayerSystem(this);
             }
             
-            // Create player through the player system
-            if (this.playerSystem) {
-                this.player = this.playerSystem.createPlayer(spawnX, spawnY);
+            // Initialize the player at the spawn point
+            this.player = this.playerSystem.createPlayer(spawnX, spawnY);
+            
+            // Configure the player sprite
+            if (this.player && this.player.sprite) {
+                console.log('Player sprite created successfully');
                 
-                if (this.player && this.player.sprite) {
-                    // Set up player physics
-                    this.player.sprite.setCollideWorldBounds(true);
+                this.player.sprite.setCollideWorldBounds(true);
+                this.player.sprite.setVisible(true);
+                this.player.sprite.setDepth(25); // Ensure player is above ALL other elements including overlays
+                
+                // DIRECT ANIMATION APPROACH: create and play animation directly in setupPlayer
+                try {
+                    console.log('Setting up animation with direct approach');
                     
-                    // Make sure player has correct scale and is visible
-                    this.player.sprite.setScale(1.0);
-                    this.player.sprite.setVisible(true);
-                    this.player.sprite.setDepth(25); // Ensure player is above ALL other elements including overlays
-                    
-                    // Log animation status - this should now show the animation exists
-                    if (this.anims.exists(ANIMATIONS.IDLE_SWIM.KEY)) {
-                        console.log('Player animation exists, playing...');
-                        this.player.sprite.play(ANIMATIONS.IDLE_SWIM.KEY);
+                    // First check if the spritesheet exists
+                    if (!this.textures.exists('diver_swim_new')) {
+                        console.error('diver_swim_new texture is missing!');
+                        // Set fallback texture
+                        this.player.sprite.setTexture('player');
                     } else {
-                        console.error('Animation still missing after setup!');
-                    }
-                    
-                    // Explicitly create helmet bubbles
-                    this.player.createMaskBubbles();
-                    
-                    // Listen for player boost events to create particles
-                    this.player.on('boostBurst', (sprite, direction) => {
-                        // Use particle system directly
-                        if (this.particleSystem) {
-                            this.particleSystem.emitBoostBurst(sprite, 'bubble', direction);
+                        // Set the texture first
+                        this.player.sprite.setTexture('diver_swim_new');
+                        console.log('Player texture set to diver_swim_new');
+                        
+                        // Create animation config directly
+                        const animConfig = {
+                            key: 'idle_swim',
+                            frames: this.anims.generateFrameNumbers('diver_swim_new', { 
+                                start: 0, 
+                                end: 7 
+                            }),
+                            frameRate: 8, // Reduced from 10 for smoother animation
+                            repeat: -1,
+                            // Enable interpolation between frames for ultra-smooth animation
+                            yoyo: false, 
+                            delay: 0,
+                            // Add Phaser's built-in easing for smoother transitions
+                            ease: 'Sine.easeInOut',
+                            // Use higher frame blending value for smooth interpolation (0 to 1)
+                            blendMode: Phaser.BlendModes.NORMAL
+                        };
+                        
+                        // Check if animation already exists
+                        if (this.anims.exists('idle_swim')) {
+                            // Remove existing animation
+                            this.anims.remove('idle_swim');
+                            console.log('Removed existing idle_swim animation');
                         }
                         
-                        // Keep camera shake in GameScene
-                        if (this.gameSceneCamera) {
-                            this.gameSceneCamera.shake(
-                                CAMERA.SHAKE.DURATION,
-                                CAMERA.SHAKE.INTENSITY
-                            );
-                        }
-                    });
-                    
-                    // Listen for camera shake events
-                    this.player.on('cameraShake', (duration, intensity) => {
-                        if (this.gameSceneCamera) {
-                            this.gameSceneCamera.shake(duration, intensity);
-                        }
-                    });
-                    
-                    // Connect to lighting system
-                    if (this.lightingSystem) {
-                        console.log('Connecting player to lighting system');
-                        this.lightingSystem.setPlayer(this.player);
+                        // Create the animation
+                        this.anims.create(animConfig);
+                        console.log('Created idle_swim animation');
+                        
+                        // Adjust the physics body size to match the new sprite dimensions
+                        // but keep the same relative size for collisions
+                        this.player.sprite.body.setSize(110, 130, true);  // Slightly smaller than visual size
+                        this.player.sprite.body.setOffset(15, 10);  // Center the physics body
+                        
+                        // Play the animation
+                        this.player.sprite.anims.play('idle_swim', true);
+                    }
+                } catch (error) {
+                    console.error('Error setting up player animation:', error);
+                    // Fallback to static image
+                    this.player.sprite.setTexture('player');
+                }
+                
+                // Explicitly create helmet bubbles
+                this.player.createMaskBubbles();
+                
+                // Listen for player boost events to create particles
+                this.player.on('boostBurst', (sprite, direction) => {
+                    // Use particle system directly
+                    if (this.particleSystem) {
+                        this.particleSystem.emitBoostBurst(sprite, 'bubble', direction);
                     }
                     
-                    console.log('Player setup complete');
-                } else {
-                    console.error('Failed to create player sprite');
+                    // Keep camera shake in GameScene
+                    if (this.gameSceneCamera) {
+                        this.gameSceneCamera.shake(
+                            CAMERA.SHAKE.DURATION,
+                            CAMERA.SHAKE.INTENSITY
+                        );
+                    }
+                });
+                
+                // Listen for camera shake events
+                this.player.on('cameraShake', (duration, intensity) => {
+                    if (this.gameSceneCamera) {
+                        this.gameSceneCamera.shake(duration, intensity);
+                    }
+                });
+                
+                // Connect to lighting system
+                if (this.lightingSystem) {
+                    console.log('Connecting player to lighting system');
+                    this.lightingSystem.setPlayer(this.player);
                 }
+                
+                console.log('Player setup complete');
             } else {
-                console.error('PlayerSystem not initialized');
+                console.error('Failed to create player sprite');
             }
         } catch (error) {
             console.error('Error in setupPlayer:', error);
@@ -892,6 +977,14 @@ export default class GameScene extends Phaser.Scene {
     update(time, delta) {
         if (!this.gameRunning) return;
         
+        // Enhanced animation management: ensure animation is playing with proper settings
+        if (this.player && this.player.sprite && this.anims.exists('idle_swim')) {
+            // If not playing or needs to be restarted due to frame issues
+            if (!this.player.sprite.anims.isPlaying || this.player.sprite.anims.getName() !== 'idle_swim') {
+                this.player.sprite.anims.play('idle_swim', true);
+            }
+        }
+        
         // Update player and oxygen first since they're critical
         if (this.player) {
             this.player.update(time, delta);
@@ -961,6 +1054,11 @@ export default class GameScene extends Phaser.Scene {
                     // Update the player sprite and flashlight immediately
                     this.player.sprite.flipX = true;
                     
+                    // Make sure animation keeps playing
+                    if (this.anims.exists('idle_swim') && !this.player.sprite.anims.isPlaying) {
+                        this.player.sprite.anims.play('idle_swim', true);
+                    }
+                    
                     // Update flashlight rotation if enabled
                     if (this.lightingSystem && this.lightingSystem.flashlightEnabled) {
                         this.lightingSystem.flashlightRotation = Math.PI; // left
@@ -974,6 +1072,11 @@ export default class GameScene extends Phaser.Scene {
                 if (this.player.sprite.flipX) {
                     // Update the player sprite and flashlight immediately
                     this.player.sprite.flipX = false;
+                    
+                    // Make sure animation keeps playing
+                    if (this.anims.exists('idle_swim') && !this.player.sprite.anims.isPlaying) {
+                        this.player.sprite.anims.play('idle_swim', true);
+                    }
                     
                     // Update flashlight rotation if enabled
                     if (this.lightingSystem && this.lightingSystem.flashlightEnabled) {

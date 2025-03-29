@@ -38,6 +38,7 @@ export default class LightingSystem {
         // Lighting zone types and their darkness levels
         this.zoneLevels = {
             'default': LIGHTING.ZONE_LEVELS.DEFAULT,
+            'bright': LIGHTING.ZONE_LEVELS.BRIGHT,
             'dim': LIGHTING.ZONE_LEVELS.DIM,
             'dark': LIGHTING.ZONE_LEVELS.DARK,
             'black': LIGHTING.ZONE_LEVELS.BLACK
@@ -81,14 +82,39 @@ export default class LightingSystem {
                 return false;
             }
             
-            // Enable the light pipeline
-            this.scene.cameras.main.setRenderToTexture('Light2D');
-            console.log('Light2D pipeline enabled');
+            // Enable the lighting system
+            this.scene.lights.enable();
+            this.scene.lights.setAmbientColor(0x808080); // Set ambient light to 50% gray
             
-            // Create the light mask for obstacles
-            this.createLightMask();
+            // Get the obstacles layer from tilemap system
+            if (this.scene.tilemapSystem && this.scene.tilemapSystem.map) {
+                const obstaclesLayer = this.scene.tilemapSystem.map.getLayer('Obstacles')?.tilemapLayer;
+                
+                if (obstaclesLayer) {
+                    // Set up Light2D pipeline for obstacles
+                    obstaclesLayer.setPipeline('Light2D');
+                    
+                    // Get all tilesets used by the obstacles layer
+                    const tilesets = obstaclesLayer.tileset;
+                    
+                    // Check each tileset for normal maps
+                    tilesets.forEach(tileset => {
+                        // Check if the tileset has a normal map defined
+                        const normalMapKey = `${tileset.name}_n`;
+                        if (this.scene.textures.exists(normalMapKey)) {
+                            console.log(`Found normal map for tileset: ${tileset.name}`);
+                            // Set the normal map for this tileset
+                            tileset.setNormalMap(normalMapKey);
+                        } else {
+                            console.log(`No normal map found for tileset: ${tileset.name}`);
+                        }
+                    });
+                }
+            }
             
+            console.log('Light2D pipeline enabled for obstacles');
             return true;
+            
         } catch (error) {
             console.error('Error initializing light pipeline:', error);
             return false;
@@ -379,6 +405,10 @@ export default class LightingSystem {
             } else {
                 console.warn('No valid lighting layer found in the map, or layer has no objects');
             }
+
+            // Remove QuadTree implementation
+            console.log('Lighting zones processed using standard approach');
+            
         } catch (error) {
             console.error('Error processing lighting zones:', error);
         }
@@ -393,10 +423,11 @@ export default class LightingSystem {
         if (!this.scene.physics.config.debug) return;
         
         const colors = {
-            'default': 0x0000ff,
-            'dim': 0x00ff00,
-            'dark': 0xffff00,
-            'black': 0xff0000
+            'default': 0x0000ff,   // Blue
+            'bright': 0x00ffff,    // Cyan
+            'dim': 0x00ff00,       // Green
+            'dark': 0xffff00,      // Yellow
+            'black': 0xff0000      // Red
         };
         
         const color = colors[zone.type] || 0x0000ff;
@@ -484,7 +515,11 @@ export default class LightingSystem {
             progressText = ` (${(progress * 100).toFixed(0)}%)`;
         }
         
-        this.debugText.setText(`Lighting: ${this.currentZoneType || 'default'} (${this.currentLightLevel.toFixed(2)})${progressText}`);
+        // Enhanced debug information with zone count and current zone status
+        this.debugText.setText(
+            `Lighting: ${this.currentZoneType || 'default'} (${this.currentLightLevel.toFixed(2)})${progressText}\n` +
+            `Total Zones: ${this.lightingZones.length}, Target: ${this.targetLightLevel.toFixed(2)}`
+        );
     }
     
     /**
@@ -534,11 +569,11 @@ export default class LightingSystem {
         const playerX = this.player.sprite ? this.player.sprite.x : this.player.x;
         const playerY = this.player.sprite ? this.player.sprite.y : this.player.y;
 
-        let shouldCheckZones = true;
         let inAnyZone = false;
         let highestLightLevel = 0;
         let enteredNewZone = false;
         let currentZoneType = null;
+        let inBrightZone = false; // Flag for when player is in a bright zone
 
         // Only check zones periodically or on significant movement
         const currentTime = this.scene.time.now;
@@ -550,29 +585,46 @@ export default class LightingSystem {
             ) : 0;
 
         if (timeSinceLastCheck > this.checkInterval || distanceMoved > 30) {
-            // Check each lighting zone
+            // First, specifically check for bright zones which override all other zone types
             for (const zone of this.lightingZones) {
-                // Skip default zones
-                if (zone.type === 'default') continue;
-
-                // Check if player is in this zone
-                if (Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
+                if (zone.type === 'bright' && Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
+                    inBrightZone = true;
                     inAnyZone = true;
-                    currentZoneType = zone.type;
-
-                    // Get the light level for this zone
-                    const zoneLevel = this.zoneLevels[zone.type] || 0;
-
-                    // Track the highest (darkest) light level
-                    if (zoneLevel > highestLightLevel) {
-                        highestLightLevel = zoneLevel;
-                    }
-
-                    // Check if this is a different zone than we were in previously
-                    if (this.currentZoneType !== zone.type) {
+                    currentZoneType = 'bright';
+                    highestLightLevel = 0; // Explicit full brightness
+                    
+                    if (this.currentZoneType !== 'bright') {
                         enteredNewZone = true;
                         if (this.scene.physics.config.debug) {
-                            console.log(`Player entered new ${zone.type} zone`);
+                            console.log('Player entered BRIGHT zone - forcing full brightness');
+                        }
+                    }
+                    
+                    // Bright zones override all other zones, so we can break early
+                    break;
+                }
+            }
+            
+            // If not in a bright zone, check other zone types (but skip if we're already in a bright zone)
+            if (!inBrightZone) {
+                for (const zone of this.lightingZones) {
+                    // Skip default and bright zones in this pass
+                    if (zone.type === 'default' || zone.type === 'bright') continue;
+                    
+                    if (Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
+                        inAnyZone = true;
+                        currentZoneType = zone.type;
+                        
+                        const zoneLevel = this.zoneLevels[zone.type] || 0;
+                        if (zoneLevel > highestLightLevel) {
+                            highestLightLevel = zoneLevel;
+                        }
+                        
+                        if (this.currentZoneType !== zone.type) {
+                            enteredNewZone = true;
+                            if (this.scene.physics.config.debug) {
+                                console.log(`Player entered new ${zone.type} zone`);
+                            }
                         }
                     }
                 }
@@ -582,6 +634,17 @@ export default class LightingSystem {
             this.prevPlayerX = playerX;
             this.prevPlayerY = playerY;
             this.lastCheckTime = currentTime;
+
+            // Handle transition back to default lighting when leaving all zones (but only if not in a bright zone)
+            if (!inAnyZone && this.currentZoneType) {
+                enteredNewZone = true;
+                currentZoneType = 'default';
+                highestLightLevel = this.zoneLevels['default'];
+                
+                if (this.scene.physics.config.debug) {
+                    console.log(`Player left all lighting zones, returning to default lighting`);
+                }
+            }
         }
 
         // Handle zone transitions
@@ -829,7 +892,7 @@ export default class LightingSystem {
         
         // Create the magenta point light at the origin for visual effect
         this.flashlightPointLight = this.scene.add.sprite(0, 0, 'bullet')
-            .setScale(0.6)
+            .setScale(0.4)
             .setAlpha(0.8)
             .setTint(0xff00ff) // Magenta color
             .setBlendMode(Phaser.BlendModes.ADD)
@@ -838,7 +901,7 @@ export default class LightingSystem {
             
         // Add a simple glow effect for the flashlight origin
         this.flashlightGlow = this.scene.add.sprite(0, 0, 'bullet')
-            .setScale(1.1)
+            .setScale(0.7)
             .setAlpha(0.7)
             .setTint(0xff40ff) // Slightly lighter magenta
             .setBlendMode(Phaser.BlendModes.ADD)
@@ -980,18 +1043,14 @@ export default class LightingSystem {
         // Position the magenta light
         let lightX, lightY;
         
-        if (this.markerOffsetX !== undefined && this.markerOffsetY !== undefined) {
-            // Use the magenta marker position from the sprite
-            const markerX = isFacingLeft ? -this.markerOffsetX : this.markerOffsetX;
-            lightX = playerX + markerX;
-            lightY = playerY + this.markerOffsetY;
-        } else {
-            // Fallback to the hard-coded values
-            const lightOffsetX = isFacingLeft ? -15 : 15;
-            const lightOffsetY = 115;
-            lightX = playerX + lightOffsetX;
-            lightY = playerY + lightOffsetY;
-        }
+        // Use new offset values for the upper-right position
+        // Adjust these values to move the light to match the red arrow in the screenshot
+        const lightOffsetX = isFacingLeft ? -45 : 45; // Increased from 40 to 45 - more outward
+        const lightOffsetY = -40; // Changed from -50 to -40 - moved down by 10px
+        
+        // Use fixed offsets instead of marker-based positioning for reliability
+        lightX = playerX + lightOffsetX;
+        lightY = playerY + lightOffsetY;
         
         // Position the point light and glow
         if (this.flashlightPointLight) {
@@ -1005,8 +1064,8 @@ export default class LightingSystem {
             if (!this.flashlightGlow.timeline) {
                 this.flashlightGlow.timeline = this.scene.tweens.add({
                     targets: this.flashlightGlow,
-                    alpha: { from: 0.5, to: 0.9 },
-                    scale: { from: 1.0, to: 1.5 },
+                    alpha: { from: 0.5, to: 0.8 },
+                    scale: { from: 0.8, to: 0.95 }, // Significantly reduced max scale from 1.1 to 0.95
                     duration: 500,
                     yoyo: true,
                     repeat: -1,

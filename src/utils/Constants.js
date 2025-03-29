@@ -75,6 +75,14 @@ export const ANIMATIONS = {
         FRAME_HEIGHT: 102,   // Updated to match actual sprite height
         FRAMES: 3            // Total number of frames in the animation
     },
+    IDLE_SWIM_NEW: {
+        KEY: 'idle_swim',    // Use the same animation key for compatibility
+        FRAME_RATE: 8,      // Reduced from 10 to 8 for smoother animation
+        FRAME_WIDTH: 139,     // Width of each frame in the new spritesheet
+        FRAME_HEIGHT: 150,   // Height of each frame in the new spritesheet
+        FRAMES: 8,           // Total number of frames in the new animation
+        TEXTURE_KEY: 'diver_swim_new' // The key for the new texture
+    },
     DROWNING: {
         KEY: 'drowning',
         FRAME_RATE: 4
@@ -188,6 +196,7 @@ export const LIGHTING = {
     TRANSITION_SPEED: 0.0004,  // Extremely slow for ultra-smooth transitions
     ZONE_LEVELS: {
         DEFAULT: 0,     // Default brightness (no darkening)
+        BRIGHT: 0,      // Explicit full brightness zone - forces lighting to reset
         DIM: 0.4,       // 40% darkness
         DARK: 0.7,      // 70% darkness
         BLACK: 0.9      // 90% darkness

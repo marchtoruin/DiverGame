@@ -2393,6 +2393,23 @@
                  "width":2392,
                  "x":848,
                  "y":10648
+                }, 
+                {
+                 "height":144,
+                 "id":20,
+                 "name":"bright",
+                 "properties":[
+                        {
+                         "name":"type",
+                         "type":"string",
+                         "value":"bright"
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":1120,
+                 "x":2016,
+                 "y":3104
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -2401,7 +2418,7 @@
          "y":0
         }],
  "nextlayerid":8,
- "nextobjectid":20,
+ "nextobjectid":21,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
