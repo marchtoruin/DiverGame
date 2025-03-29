@@ -1,5 +1,5 @@
 /**
- * BatteryMeter - UI component to display flashlight's battery level
+ * BatteryMeter - UI component to display battery icon and level
  */
 export default class BatteryMeter {
     /**
@@ -9,116 +9,128 @@ export default class BatteryMeter {
      */
     constructor(scene, config = {}) {
         this.scene = scene;
-        this.x = config.x || 10;
-        this.y = config.y || 100; // Position below health bar
-        this.width = config.width || 200;
-        this.height = config.height || 40;
-        this.maxValue = config.maxValue || 100;
-        this.value = config.initialValue !== undefined ? config.initialValue : this.maxValue;
         
-        // Colors
-        this.colors = {
-            background: 0x000000,
-            bar: 0xff40ff, // Magenta color to match flashlight
-            border: 0x000000,
-            text: '#ffffff'
+        // Battery level configuration
+        this.maxBatteryLevel = 100;
+        this.currentBatteryLevel = 100;
+        this.drainRate = config.drainRate || 1; // 1% per interval
+        this.rechargeRate = config.rechargeRate || 0.5; // Recharge 0.5% per interval (half speed of drain)
+        this.drainInterval = config.drainInterval || 250; // 4 times per second
+        this.isFlashlightActive = false;
+        
+        // Position configuration
+        this.targetX = 25;
+        this.targetY = 195; // Moved down 50px from original 145
+        
+        // Color thresholds and values
+        this.colorThresholds = {
+            low: 0.3,    // 30% - transition to red
+            medium: 0.6  // 60% - transition to yellow
         };
         
-        // Create container
-        this.container = scene.add.container(this.x, this.y);
+        this.colors = {
+            high: 0x00ff00,   // Green
+            medium: 0xffff00, // Yellow
+            low: 0xff0000     // Red
+        };
         
-        // Create white border
-        this.whiteBorder = scene.add.rectangle(
-            -2,
-            -2,
-            this.width + 8,
-            this.height + 8,
-            0xffffff
+        // Create container for battery elements
+        this.container = scene.add.container(this.targetX, this.targetY);
+        this.container.setScrollFactor(0);
+        this.container.setDepth(999);
+        
+        // Create battery icon (60x108px)
+        this.icon = scene.add.sprite(0, -80, 'battery');
+        this.icon.setOrigin(0, 0.5);
+        this.icon.setScale(0.5);
+        
+        // Create battery level bar
+        this.levelBar = scene.add.rectangle(
+            8,      // X offset
+            -55,    // Y offset adjusted to match new sprite position
+            16,     // Width
+            42,     // Height reduced from 50 to 35 to fit battery sprite better
+            this.colors.high
         );
-        this.whiteBorder.setOrigin(0, 0);
+        this.levelBar.setOrigin(0, 1);
+        this.levelBar.setDepth(-1);
         
-        // Create black border
-        this.border = scene.add.rectangle(
-            0,
-            0,
-            this.width + 4,
-            this.height + 4,
-            this.colors.border
-        );
-        this.border.setOrigin(0, 0);
+        // Add elements to container
+        this.container.add([this.levelBar, this.icon]);
         
-        // Create black background
-        this.background = scene.add.rectangle(
-            2,
-            2,
-            this.width,
-            this.height,
-            this.colors.background
-        );
-        this.background.setOrigin(0, 0);
+        // Set up keyboard input
+        this.keyF = this.scene.input.keyboard.addKey('F');
+        this.keyF.on('down', this.toggleFlashlight, this);
         
-        // Create battery bar
-        this.bar = scene.add.rectangle(
-            2,
-            2,
-            this.width,
-            this.height,
-            this.colors.bar
-        );
-        this.bar.setOrigin(0, 0);
-        
-        // Add battery icon and text
-        this.label = scene.add.text(
-            15,
-            this.height / 2 + 2,
-            '🔋', // Battery emoji as placeholder, can be replaced with a sprite
-            {
-                fontFamily: 'Verdana',
-                fontSize: '20px',
-                color: '#ffffff',
-                fontStyle: 'bold',
-                resolution: 4,
-                padding: { x: 1, y: 1 }
-            }
-        );
-        this.label.setOrigin(0, 0.5);
-        
-        // Add percentage text to the right
-        this.percentText = scene.add.text(
-            this.width + 10,
-            this.height / 2 + 2,
-            '100%',
-            {
-                fontFamily: 'Verdana',
-                fontSize: '16px',
-                color: '#ffffff',
-                fontStyle: 'bold',
-                resolution: 4,
-                padding: { x: 1, y: 1 }
-            }
-        );
-        this.percentText.setOrigin(0, 0.5);
-        
-        // Add elements to container in correct order
-        this.container.add([
-            this.whiteBorder,
-            this.border,
-            this.background,
-            this.bar,
-            this.label,
-            this.percentText
-        ]);
-        
-        // Set initial value
-        this.updateValue(this.value, this.maxValue);
-        
-        // Set depth and scroll factor
-        this.setScrollFactor(0);
-        this.setDepth(1000);
+        // Start battery drain timer (but won't drain unless active)
+        this.startDrain();
         
         // Add event listeners
         this.scene.events.on('resize', this.handleResize, this);
         this.scene.events.on('postupdate', this.checkPosition, this);
+        
+        // Debug: Test initial update
+        this.updateBatteryLevel();
+    }
+    
+    /**
+     * Toggle flashlight state on F key press
+     */
+    toggleFlashlight() {
+        this.isFlashlightActive = !this.isFlashlightActive;
+        console.log('BatteryMeter: Flashlight toggled:', this.isFlashlightActive);
+    }
+    
+    /**
+     * Start the battery drain timer
+     */
+    startDrain() {
+        this.drainTimer = this.scene.time.addEvent({
+            delay: this.drainInterval,
+            callback: this.updateBatteryLevel,
+            callbackScope: this,
+            loop: true
+        });
+    }
+    
+    /**
+     * Update the battery level and visual representation
+     */
+    updateBatteryLevel() {
+        // Handle battery drain when flashlight is active
+        if (this.isFlashlightActive && this.currentBatteryLevel > 0) {
+            // Reduce battery level
+            this.currentBatteryLevel = Math.max(0, this.currentBatteryLevel - this.drainRate);
+            
+            // If battery is depleted, emit event
+            if (this.currentBatteryLevel === 0) {
+                console.log('BatteryMeter: Battery depleted!');
+                this.scene.events.emit('batteryDepleted');
+                this.isFlashlightActive = false;
+            }
+        } 
+        // Handle battery recharge when flashlight is off
+        else if (!this.isFlashlightActive && this.currentBatteryLevel < this.maxBatteryLevel) {
+            // Increase battery level
+            this.currentBatteryLevel = Math.min(this.maxBatteryLevel, this.currentBatteryLevel + this.rechargeRate);
+        }
+        
+        // Calculate percentage and update visuals
+        const percentage = this.currentBatteryLevel / this.maxBatteryLevel;
+        
+        // Update bar height
+        this.levelBar.scaleY = percentage;
+        
+        // Update color based on threshold
+        let color;
+        if (percentage <= this.colorThresholds.low) {
+            color = this.colors.low;
+        } else if (percentage <= this.colorThresholds.medium) {
+            color = this.colors.medium;
+        } else {
+            color = this.colors.high;
+        }
+        this.levelBar.setFillStyle(color);
     }
     
     /**
@@ -126,81 +138,57 @@ export default class BatteryMeter {
      */
     checkPosition() {
         if (this.container) {
-            if (this.container.x !== this.x || this.container.y !== this.y) {
-                this.container.setPosition(this.x, this.y);
+            if (this.container.x !== this.targetX || this.container.y !== this.targetY) {
+                this.container.setPosition(this.targetX, this.targetY);
             }
             
             if (this.container.scrollFactorX !== 0 || this.container.scrollFactorY !== 0) {
                 this.container.setScrollFactor(0);
             }
-            
-            if (this.container.depth < 1000) {
-                this.container.setDepth(1000);
-            }
         }
     }
     
     /**
-     * Handle resize events to keep the meter in the correct position
+     * Handle resize events
      */
     handleResize() {
         if (this.container) {
-            this.container.setPosition(this.x, this.y);
+            this.container.setPosition(this.targetX, this.targetY);
             this.container.setScrollFactor(0);
-            this.container.setDepth(1000);
         }
     }
     
     /**
-     * Update the battery meter's value
-     * @param {number} value - Current battery value
-     * @param {number} maxValue - Maximum battery value
+     * Get current battery level
+     * @returns {number} Current battery level (0-100)
      */
-    updateValue(value, maxValue = this.maxValue) {
-        this.value = value;
-        
-        if (maxValue !== undefined) {
-            this.maxValue = maxValue;
-        }
-        
-        // Calculate the percentage of battery remaining
-        const percent = Phaser.Math.Clamp(this.value / this.maxValue, 0, 1);
-        
-        // Update the bar width
-        if (this.bar) {
-            this.bar.width = this.width * percent;
-        }
-        
-        // Update percentage text
-        if (this.percentText) {
-            this.percentText.setText(`${Math.round(percent * 100)}%`);
-        }
+    getBatteryLevel() {
+        return this.currentBatteryLevel;
     }
     
     /**
-     * Set the depth of the container to ensure it renders on top
-     * @param {number} depth - The depth value
+     * Set battery level
+     * @param {number} level - New battery level (0-100)
      */
-    setDepth(depth) {
-        if (this.container) {
-            this.container.setDepth(depth);
-        }
-    }
-    
-    /**
-     * Set the scroll factor for the container (0 = fixed to camera)
-     * @param {number} value - Scroll factor value
-     */
-    setScrollFactor(value) {
-        if (this.container) {
-            this.container.setScrollFactor(value);
-        }
+    setBatteryLevel(level) {
+        this.currentBatteryLevel = Phaser.Math.Clamp(level, 0, this.maxBatteryLevel);
+        this.updateBatteryLevel();
     }
     
     /**
      * Destroy the battery meter and clean up
      */
     destroy() {
+        // Stop drain timer
+        if (this.drainTimer) {
+            this.drainTimer.remove();
+        }
+        
+        // Remove keyboard input
+        if (this.keyF) {
+            this.keyF.removeAllListeners();
+        }
+        
         // Remove event listeners
         this.scene.events.off('resize', this.handleResize, this);
         this.scene.events.off('postupdate', this.checkPosition, this);
