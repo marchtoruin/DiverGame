@@ -336,15 +336,13 @@ export default class LightingSystem {
                 }
             }
             
-            // If still not found, try the first object layer for testing
-            if (!lightingLayer && map.objects.length > 0) {
-                console.warn('No lighting layer found, using first object layer for testing:', map.objects[0].name);
-                lightingLayer = map.objects[0];
-            }
-            
             // Process the lighting layer if found
             if (lightingLayer && lightingLayer.objects && lightingLayer.objects.length > 0) {
                 console.log(`Processing ${lightingLayer.objects.length} objects from layer: ${lightingLayer.name}`);
+                
+                // First process bright zones to ensure they're at the start of the array
+                const brightZones = [];
+                const otherZones = [];
                 
                 lightingLayer.objects.forEach(obj => {
                     // Lighting zones must be rectangle objects with width and height
@@ -393,21 +391,28 @@ export default class LightingSystem {
                         rect: new Phaser.Geom.Rectangle(obj.x, obj.y, obj.width, obj.height)
                     };
                     
-                    // Add to zones collection
-                    this.lightingZones.push(zone);
-                    console.log(`Added ${zoneType} lighting zone at (${obj.x}, ${obj.y}) with size ${obj.width}x${obj.height}`);
+                    // Sort zones by type
+                    if (zoneType === 'bright') {
+                        brightZones.push(zone);
+                    } else {
+                        otherZones.push(zone);
+                    }
                     
-                    // Create debug visualization
-                    this.createDebugVisual(zone);
+                    console.log(`Added ${zoneType} lighting zone at (${obj.x}, ${obj.y}) with size ${obj.width}x${obj.height}`);
                 });
                 
-                console.log(`Processed ${this.lightingZones.length} lighting zones`);
+                // Combine zones with bright zones first
+                this.lightingZones = [...brightZones, ...otherZones];
+                
+                console.log(`Processed ${this.lightingZones.length} lighting zones (${brightZones.length} bright zones)`);
+                
+                // Create debug visuals for all zones
+                this.lightingZones.forEach(zone => this.createDebugVisual(zone));
             } else {
                 console.warn('No valid lighting layer found in the map, or layer has no objects');
             }
-
-            // Remove QuadTree implementation
-            console.log('Lighting zones processed using standard approach');
+            
+            console.log('Lighting zones processed with bright zones prioritized');
             
         } catch (error) {
             console.error('Error processing lighting zones:', error);
@@ -570,10 +575,10 @@ export default class LightingSystem {
         const playerY = this.player.sprite ? this.player.sprite.y : this.player.y;
 
         let inAnyZone = false;
-        let highestLightLevel = 0;
-        let enteredNewZone = false;
         let currentZoneType = null;
-        let inBrightZone = false; // Flag for when player is in a bright zone
+        let enteredNewZone = false;
+        let targetLevel = this.zoneLevels['default'];
+        let inBrightZone = false;
 
         // Only check zones periodically or on significant movement
         const currentTime = this.scene.time.now;
@@ -591,7 +596,7 @@ export default class LightingSystem {
                     inBrightZone = true;
                     inAnyZone = true;
                     currentZoneType = 'bright';
-                    highestLightLevel = 0; // Explicit full brightness
+                    targetLevel = 0; // Explicit full brightness
                     
                     if (this.currentZoneType !== 'bright') {
                         enteredNewZone = true;
@@ -600,31 +605,37 @@ export default class LightingSystem {
                         }
                     }
                     
-                    // Bright zones override all other zones, so we can break early
+                    // Force immediate transition to full brightness
+                    this.transitionDuration = 500; // Quick transition for bright zones
                     break;
                 }
             }
             
-            // If not in a bright zone, check other zone types (but skip if we're already in a bright zone)
+            // Only check other zones if not in a bright zone
             if (!inBrightZone) {
-                for (const zone of this.lightingZones) {
-                    // Skip default and bright zones in this pass
-                    if (zone.type === 'default' || zone.type === 'bright') continue;
+                let mostRecentZone = null;
+                
+                // Iterate through zones in reverse to prioritize later zones (higher layers)
+                for (let i = this.lightingZones.length - 1; i >= 0; i--) {
+                    const zone = this.lightingZones[i];
+                    // Skip default zones
+                    if (zone.type === 'default') continue;
                     
                     if (Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
                         inAnyZone = true;
-                        currentZoneType = zone.type;
-                        
-                        const zoneLevel = this.zoneLevels[zone.type] || 0;
-                        if (zoneLevel > highestLightLevel) {
-                            highestLightLevel = zoneLevel;
-                        }
-                        
-                        if (this.currentZoneType !== zone.type) {
-                            enteredNewZone = true;
-                            if (this.scene.physics.config.debug) {
-                                console.log(`Player entered new ${zone.type} zone`);
+                        // Take the first (most recent) zone we find the player in
+                        if (!mostRecentZone) {
+                            mostRecentZone = zone;
+                            currentZoneType = zone.type;
+                            targetLevel = this.zoneLevels[zone.type];
+                            
+                            if (this.currentZoneType !== zone.type) {
+                                enteredNewZone = true;
+                                if (this.scene.physics.config.debug) {
+                                    console.log(`Player entered new ${zone.type} zone`);
+                                }
                             }
+                            break; // Exit after finding the most recent zone
                         }
                     }
                 }
@@ -635,14 +646,14 @@ export default class LightingSystem {
             this.prevPlayerY = playerY;
             this.lastCheckTime = currentTime;
 
-            // Handle transition back to default lighting when leaving all zones (but only if not in a bright zone)
+            // Handle transition back to default lighting when leaving all zones
             if (!inAnyZone && this.currentZoneType) {
                 enteredNewZone = true;
                 currentZoneType = 'default';
-                highestLightLevel = this.zoneLevels['default'];
+                targetLevel = this.zoneLevels['default'];
                 
                 if (this.scene.physics.config.debug) {
-                    console.log(`Player left all lighting zones, returning to default lighting`);
+                    console.log('Player left all lighting zones, returning to default lighting');
                 }
             }
         }
@@ -654,12 +665,14 @@ export default class LightingSystem {
             this.transitionStartValue = this.currentLightLevel;
             
             // Set target light level based on new zone
-            this.targetLightLevel = highestLightLevel;
+            this.targetLightLevel = targetLevel;
             this.currentZoneType = currentZoneType;
 
             // Calculate transition duration based on light level difference
-            const levelDifference = Math.abs(this.targetLightLevel - this.currentLightLevel);
-            this.transitionDuration = Math.max(1000, levelDifference * 2000);
+            if (!inBrightZone) { // Skip if we're in a bright zone (already set to 500ms)
+                const levelDifference = Math.abs(this.targetLightLevel - this.currentLightLevel);
+                this.transitionDuration = Math.max(1000, levelDifference * 2000);
+            }
 
             if (this.scene.physics.config.debug) {
                 console.log(`Transitioning to ${currentZoneType} (${this.targetLightLevel}) over ${this.transitionDuration}ms`);
@@ -676,10 +689,16 @@ export default class LightingSystem {
 
             // Apply smooth easing
             let easedProgress;
-            if (progress < 0.5) {
-                easedProgress = 4 * Math.pow(progress, 3);
+            if (inBrightZone) {
+                // Linear transition for bright zones
+                easedProgress = progress;
             } else {
-                easedProgress = 1 - Math.pow(-2 * progress + 2, 3) / 2;
+                // Smooth easing for other transitions
+                if (progress < 0.5) {
+                    easedProgress = 4 * Math.pow(progress, 3);
+                } else {
+                    easedProgress = 1 - Math.pow(-2 * progress + 2, 3) / 2;
+                }
             }
 
             // Update light level
