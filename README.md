@@ -1,11 +1,16 @@
-# Underwater Diver Game
+# DiverGame
 
+<<<<<<< HEAD
 A Phaser 3 game where you control a diver exploring an underwater world. Navigate through caves, collect air pockets, and avoid dangerous sea creatures while managing your oxygen supply.
+=======
+Phaser 3 game where you control a diver exploring an underwater world, collecting air pockets while avoiding obstacles.
+>>>>>>> f0b5dbea5f824fc14944867ca2c183c1ab3ab113
 
 ## Features
 
 ### Core Mechanics
 - Smooth diver movement with momentum-based physics
+<<<<<<< HEAD
 - Advanced boost system with cooldown and oxygen consumption
 - Shooting mechanics with bullet-wall collisions
 - Oxygen management system with air pocket collection
@@ -65,6 +70,28 @@ A Phaser 3 game where you control a diver exploring an underwater world. Navigat
 - JavaScript/ES6+
 - Tiled Map Editor
 - HTML5/CSS3
+=======
+- Parallax scrolling background with multiple layers
+- Collectible air pockets to maintain oxygen
+- Oxygen management system with visual indicator
+- Flashlight system for dark areas
+- Bullet system with enhanced visibility in darkness
+- Ambient bubble effects
+- Touch controls for mobile gameplay
+- Enemies and combat system
+- Improved lighting and darkness detection
+
+## Development Status
+
+Currently in pre-production, implementing enhanced gameplay features.
+
+## Controls
+
+- WASD or Arrow Keys: Move the diver
+- Space: Boost
+- F: Toggle flashlight
+- Left Mouse: Fire weapon
+>>>>>>> f0b5dbea5f824fc14944867ca2c183c1ab3ab113
 
 ### Key Systems
 - EntityLayerSystem for map entity management
@@ -77,6 +104,7 @@ A Phaser 3 game where you control a diver exploring an underwater world. Navigat
 ### Setup
 
 1. Clone the repository
+<<<<<<< HEAD
 2. Install dependencies: `npm install`
 3. Run the development server: `npm start`
 4. Access the game at `http://localhost:8080`
@@ -89,11 +117,16 @@ A Phaser 3 game where you control a diver exploring an underwater world. Navigat
   - Air pockets
   - Enemy spawn points
   - Lighting zones
+=======
+2. Run `npm install` to install dependencies
+3. Run `npm start` for development mode
+4. Run `npm run build` for production build
+>>>>>>> f0b5dbea5f824fc14944867ca2c183c1ab3ab113
 
 ## Assets
 
-The game includes:
 - Multiple background layers for parallax effect
+<<<<<<< HEAD
 - Animated diver sprite
 - Enemy sprites
 - Rock and cave obstacles
@@ -155,3 +188,10 @@ Thank you for bringing this up — it’s helpful feedback for improving my assi
 
 -love 
 ai too fancy
+=======
+- Diver sprite with animations
+- Air bubble collectibles
+- Ambient bubble particles
+- Enemy sprites
+- Weapon system
+>>>>>>> f0b5dbea5f824fc14944867ca2c183c1ab3ab113

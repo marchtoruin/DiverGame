@@ -170,4 +170,4 @@ export default class BulletSystem {
         }
         this.bullets.clear(true, true);
     }
-} 
+}

@@ -217,5 +217,9 @@ export const LIGHTING = {
             X: 100,              // Position ahead of player
             Y: 0
         }
+    },
+    TREAD_SCALING: {
+        MIN_FORCE: 0.65,
+        SPEED_THRESHOLD: 275
     }
-}; 
+};

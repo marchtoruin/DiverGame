@@ -1,18 +1,8 @@
-import Phaser from 'phaser';
-import { PLAYER, ANIMATIONS, PHYSICS, OXYGEN, CAMERA } from '../utils/Constants';
+import { PLAYER, OXYGEN } from '../utils/Constants.js';
 
-/**
- * Player entity for the underwater game
- */
-export default class Player extends Phaser.Events.EventEmitter {
-    /**
-     * Create the player entity
-     * @param {Phaser.Scene} scene - The scene this player belongs to
-     * @param {number} x - Initial x position
-     * @param {number} y - Initial y position
-     */
+export default class Player extends Phaser.GameObjects.Container {
     constructor(scene, x, y) {
-        super();
+        super(scene, x, y);
         
         this.scene = scene;
         this.sprite = null;
@@ -343,7 +333,7 @@ export default class Player extends Phaser.Events.EventEmitter {
         if (input.boost && this.oxygen > 0) {
             if (!this.boostActive) {
                 this.boostActive = true;
-                this.emit('boostStart');
+                this.scene.events.emit('boostStart');
             }
             
             // Calculate boost direction based on input
@@ -363,7 +353,7 @@ export default class Player extends Phaser.Events.EventEmitter {
             
             // Consume oxygen while boosting
             this.oxygen = Math.max(0, this.oxygen - PLAYER.BOOST.OXYGEN_COST * (1/60)); // Assuming 60 FPS
-            this.emit('oxygenChanged', this.oxygen, this.maxOxygen);
+            this.scene.events.emit('oxygenChanged', this.oxygen, this.maxOxygen);
             
             // Create boost effects
             const now = Date.now();
@@ -375,7 +365,7 @@ export default class Player extends Phaser.Events.EventEmitter {
             // When not boosting
             if (this.boostActive) {
                 this.boostActive = false;
-                this.emit('boostEnd');
+                this.scene.events.emit('boostEnd');
             }
             
             // Reset to normal max velocity
@@ -397,7 +387,7 @@ export default class Player extends Phaser.Events.EventEmitter {
             (!this._lastMovementBurstTime || (Date.now() - this._lastMovementBurstTime > 500)) && 
             !this.boostActive) {
             
-            this.emit('movementBurst', this.sprite, currentDirection);
+            this.scene.events.emit('movementBurst', this.sprite, currentDirection);
             this._lastMovementBurstTime = Date.now();
         }
         
@@ -487,157 +477,36 @@ export default class Player extends Phaser.Events.EventEmitter {
      */
     updateBoost(delta) {
         const now = Date.now();
+        const stamina = PLAYER.TREAD_WATER.STAMINA;
         
-        // Handle boost cooldown expiration
-        if (this.boostCooldown && now > this.boostCooldownTime) {
-            this.boostCooldown = false;
-        }
-        
-        // Process boost activation/deactivation
-        if (this._inputState?.boost) {
-            // Try to activate boost if not already active and not on cooldown
-            if (!this.boostActive && !this.boostCooldown && this.oxygen > 0) {
-                console.log('BOOST ACTIVATED! 🚀');
-                this.activateBoost();
-                
-                // Always add initial camera shake on boost activation
-                this.emit('cameraShake', CAMERA.SHAKE.DURATION, CAMERA.SHAKE.INTENSITY);
+        if (this._inputState.up) {
+            // If we just started treading
+            if (this.treadStamina.isRecovering) {
+                this.treadStamina.lastTreadStart = now;
+                this.treadStamina.isRecovering = false;
             }
             
-            // Consume oxygen while boosting
-            if (this.boostActive && this.oxygen > 0) {
-                // Deplete oxygen faster when boosting (use coefficient for time-based depletion)
-                this.oxygen -= (delta / 1000) * PLAYER.BOOST.OXYGEN_COST;
+            // Calculate how long we've been treading
+            this.treadStamina.currentTreadDuration = now - this.treadStamina.lastTreadStart;
+            
+            // If we're past the decay start time
+            if (this.treadStamina.currentTreadDuration > stamina.DECAY_START) {
+                // Calculate effectiveness based on how long past decay start we are
+                const decayTime = this.treadStamina.currentTreadDuration - stamina.DECAY_START;
+                const decayProgress = Math.min(1, decayTime / (stamina.MAX_DURATION - stamina.DECAY_START));
                 
-                // Handle oxygen depletion during boost
-                if (this.oxygen <= 0) {
-                    this.oxygen = 0;
-                    this.deactivateBoost();
-                    this.emit('playerOxygenChanged', this.oxygen, this.maxOxygen);
-                }
-                
-                // Emit continuous boost particles at regular intervals
-                if (now - (this._lastBoostParticleTime || 0) > PLAYER.BOOST.BURST_INTERVAL) {
-                    this._lastBoostParticleTime = now;
-                    
-                    // Get current speed for effects intensity scaling
-                    const velocity = {
-                        x: this.sprite.body.velocity.x,
-                        y: this.sprite.body.velocity.y
-                    };
-                    
-                    const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-                    
-                    console.log('Emitting boost burst particles! 💨');
-                    this.emitBoostBurst(speed);
-                    
-                    // Add camera shake for high speeds (scale intensity with speed)
-                    if (speed > 500) {
-                        const speedFactor = Math.min(1.0, (speed - 500) / 500);
-                        const shakeIntensity = CAMERA.SHAKE.INTENSITY * (1 + speedFactor);
-                        this.emit('cameraShake', CAMERA.SHAKE.DURATION, shakeIntensity);
-                    }
-                }
+                // Exponential decay of effectiveness
+                this.treadStamina.effectiveness = 1 - (1 - stamina.MIN_EFFECTIVENESS) * 
+                    (1 - Math.pow(1 - decayProgress, stamina.DECAY_RATE));
             }
-        } else if (this.boostActive) {
-            // Deactivate boost when input is released
-            console.log('BOOST DEACTIVATED');
-            this.deactivateBoost();
-        }
-    }
-
-    /**
-     * Emit a burst of particles when boost is activated
-     * @param {number} speed - Current player speed for effect scaling
-     */
-    emitBoostBurst(speed = 0) {
-        if (!this.sprite || !this.sprite.body) return;
-        
-        console.log('emitBoostBurst called!');
-        
-        // Get the current input state for more responsive direction changes
-        const input = this._inputState || this.getInputState();
-        
-        // Determine particle direction based on input, not velocity
-        // This ensures particles immediately respond to direction changes
-        let direction = { x: 0, y: 0 };
-        
-        // Get direction from input (like in processMovement)
-        if (input.left) direction.x = -1;
-        else if (input.right) direction.x = 1;
-        
-        if (input.up) direction.y = -1;
-        else if (input.down) direction.y = 1;
-        
-        // If no input direction, fallback to facing direction
-        if (direction.x === 0 && direction.y === 0) {
-            direction.x = this.sprite.flipX ? -1 : 1;
-        }
-        
-        // Normalize the direction vector if needed
-        const magnitude = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
-        if (magnitude > 0 && magnitude !== 1) {
-            direction.x /= magnitude;
-            direction.y /= magnitude;
-        }
-        
-        console.log(`Boost direction: x=${direction.x}, y=${direction.y}, speed=${speed}`);
-        
-        // Add a parameter to indicate if this is a high-speed boost
-        const isHighSpeedBoost = speed > 500;
-        
-        // CRITICAL: Direct call to scene's createBoostParticles method
-        if (this.scene && typeof this.scene.createBoostParticles === 'function') {
-            console.log('Calling scene.createBoostParticles directly');
-            // Pass the high-speed flag to create more dramatic effects at high speeds
-            this.scene.createBoostParticles(this.sprite, direction, isHighSpeedBoost);
         } else {
-            console.warn('Scene does not have createBoostParticles method, falling back to event');
-            // Fallback to event emission
-            this.emit('boostBurst', this.sprite, direction, isHighSpeedBoost);
-        }
-    }
-
-    /**
-     * Activate the boost
-     */
-    activateBoost() {
-        if (this.boostCooldown || this.boostActive || this.oxygen <= 0) return;
-        
-        this.boostActive = true;
-        
-        // Visual feedback
-        if (this.scene.events) {
-            this.scene.events.emit('playerBoostActivated');
+            // Recover stamina when not treading
+            this.treadStamina.isRecovering = true;
+            this.treadStamina.effectiveness = Math.min(1, 
+                this.treadStamina.effectiveness + stamina.RECOVERY_RATE * (this.scene.game.loop.delta / 1000));
         }
         
-        console.log('Boost activated!');
-    }
-    
-    /**
-     * Deactivate the boost
-     */
-    deactivateBoost() {
-        if (!this.boostActive) return;
-        
-        this.boostActive = false;
-        this.boostCooldown = true;
-        this.boostCooldownTime = Date.now() + PLAYER.BOOST.COOLDOWN;
-        
-        // Store the time when boost was deactivated for post-boost momentum
-        this.lastBoostEndTime = Date.now();
-        // Store the velocity at boost end for momentum calculation
-        this.postBoostVelocity = {
-            x: this.sprite.body.velocity.x,
-            y: this.sprite.body.velocity.y
-        };
-        
-        // Visual feedback
-        if (this.scene.events) {
-            this.scene.events.emit('playerBoostDeactivated');
-        }
-        
-        console.log('Boost deactivated, cooldown started');
+        return this.treadStamina.effectiveness;
     }
 
     /**
@@ -665,19 +534,19 @@ export default class Player extends Phaser.Events.EventEmitter {
         
         // Only emit event if oxygen changed
         if (oldOxygen !== this.oxygen) {
-            this.emit('playerOxygenChanged', this.oxygen, this.maxOxygen);
+            this.scene.events.emit('playerOxygenChanged', this.oxygen, this.maxOxygen);
             
             // Handle low oxygen state
             const isLowOxygenNow = this.oxygen <= this.maxOxygen * 0.3;
             if (isLowOxygenNow !== this.isLowOxygen) {
                 this.isLowOxygen = isLowOxygenNow;
-                this.emit('playerLowOxygen', this.isLowOxygen);
+                this.scene.events.emit('playerLowOxygen', this.isLowOxygen);
             }
             
             // Handle oxygen depletion
             if (this.oxygen <= 0 && !this.oxygenDepleted) {
                 this.oxygenDepleted = true;
-                this.emit('playerOxygenDepleted');
+                this.scene.events.emit('playerOxygenDepleted');
             } else if (this.oxygen > 0 && this.oxygenDepleted) {
                 this.oxygenDepleted = false;
             }
@@ -707,7 +576,7 @@ export default class Player extends Phaser.Events.EventEmitter {
         this.oxygen = Math.min(this.maxOxygen, this.oxygen + amount);
         this.oxygenDepleted = false;
         
-        this.emit('oxygenChange', this.oxygen, this.maxOxygen);
+        this.scene.events.emit('oxygenChange', this.oxygen, this.maxOxygen);
         return this.oxygen;
     }
 
@@ -752,7 +621,7 @@ export default class Player extends Phaser.Events.EventEmitter {
             this.scene.cameras.main.shake(100, 0.01 * amount);
         }
         
-        this.emit('healthChange', this.health, PLAYER.HEALTH.MAX);
+        this.scene.events.emit('healthChange', this.health, PLAYER.HEALTH.MAX);
         
         if (this.health <= 0 && !this.isDead) {
             this.die();
@@ -846,7 +715,7 @@ export default class Player extends Phaser.Events.EventEmitter {
         const distance = Math.sqrt(dx * dx + dy * dy);
         
         if (distance > 1) {
-            this.emit('movement', {
+            this.scene.events.emit('movement', {
                 x: dx,
                 y: dy,
                 distance: distance
