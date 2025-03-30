@@ -65,6 +65,7 @@ import { GameSceneCamera } from './components/GameSceneCamera';
 import BackgroundSystem from '../systems/BackgroundSystem';
 import LightingSystem from '../systems/LightingSystem';
 import GameStateManager from '../systems/GameStateManager';
+import BatterySystem from '../systems/BatterySystem';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -206,6 +207,8 @@ export default class GameScene extends Phaser.Scene {
         this.gameRunning = true;
         
         try {
+            console.log('🎮 GameScene instance:', this.constructor.name);
+            
             // Initialize background system first
             this.backgroundSystem = new BackgroundSystem(this);
             this.backgroundSystem.createFullScreenBackground();
@@ -316,6 +319,16 @@ export default class GameScene extends Phaser.Scene {
             
             // Initialize player system
             this.playerSystem = new PlayerSystem(this);
+            
+            // Initialize battery system and hook up event listener
+            this.batterySystem = new BatterySystem(this);
+            this.batterySystem.scene.events.on('battery-depleted', () => {
+                console.log("💡 GameScene caught battery-depleted");
+                if (this.lightingSystem?.flashlightEnabled) {
+                    console.log("💡 GameScene toggling flashlight OFF");
+                    this.lightingSystem.toggleFlashlight('flashlight_cone1');
+                }
+            });
             
             // Initialize air pocket system after player
             this.airPocketSystem = new AirPocketSystem(this, this.player);

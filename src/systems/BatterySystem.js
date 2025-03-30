@@ -4,12 +4,14 @@
 export default class BatterySystem {
     constructor(scene) {
         this.scene = scene;
+        console.log('🔋 BatterySystem initialized with scene:', this.scene.constructor.name);
         this.maxBattery = 100;
         this.currentBattery = this.maxBattery;
         this.drainRate = 2; // Battery percentage drained per second
         this.rechargeRate = 5; // Battery percentage recharged per second
         this.isFlashlightOn = false;
         this.lastUpdateTime = 0;
+        this.batteryDepleted = false; // Flag to prevent multiple depleted events
         
         // Battery level thresholds and their corresponding colors
         this.batteryStates = [
@@ -18,6 +20,17 @@ export default class BatterySystem {
             { threshold: 25, color: 0xff8800 }, // Orange (49-25%)
             { threshold: 0, color: 0xff0000 }   // Red (24-0%)
         ];
+
+        // Listen for battery depleted event
+        this.scene.events.on('batteryDepleted', () => {
+            console.log('Battery depleted event received - turning off flashlight');
+            // First update our internal state
+            this.isFlashlightOn = false;
+            // Then toggle the flashlight in the lighting system
+            if (this.scene.lightingSystem) {
+                this.scene.lightingSystem.toggleFlashlight('flashlight_cone1');
+            }
+        });
     }
 
     /**
@@ -33,17 +46,34 @@ export default class BatterySystem {
         const deltaSeconds = (time - this.lastUpdateTime) / 1000;
         this.lastUpdateTime = time;
 
-        if (this.isFlashlightOn && this.currentBattery > 0) {
-            // Drain battery when flashlight is on
+        if (this.isFlashlightOn) {
             this.currentBattery = Math.max(0, this.currentBattery - (this.drainRate * deltaSeconds));
             
-            // Turn off flashlight if battery is depleted
-            if (this.currentBattery === 0) {
-                this.turnOffFlashlight();
+            // Check for battery depletion
+            if (this.currentBattery <= 0 && !this.batteryDepleted) {
+                this.batteryDepleted = true;
+                console.log("🔋 Battery depleted — emitting event from scene:", this.scene.constructor.name);
+                this.scene.events.emit('battery-depleted');
             }
-        } else if (!this.isFlashlightOn && this.currentBattery < this.maxBattery) {
-            // Recharge battery when flashlight is off
+        } else if (this.currentBattery < this.maxBattery) {
             this.currentBattery = Math.min(this.maxBattery, this.currentBattery + (this.rechargeRate * deltaSeconds));
+            // Reset the depleted flag when battery recharges
+            if (this.currentBattery > 0 && this.batteryDepleted) {
+                this.batteryDepleted = false;
+            }
+        }
+    }
+
+    /**
+     * Force the flashlight to turn off (used when battery depletes)
+     */
+    forceFlashlightOff() {
+        this.isFlashlightOn = false;
+        if (this.scene.lightingSystem) {
+            // Ensure the flashlight is turned off in the lighting system
+            if (this.scene.lightingSystem.isFlashlightOn) {
+                this.scene.lightingSystem.toggleFlashlight();
+            }
         }
     }
 
