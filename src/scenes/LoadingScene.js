@@ -27,6 +27,8 @@ import seaweedImg from '../assets/seaweed.png';
 import flashlightCone1Img from '../assets/flashlight_cone1.png';
 import new_idle_swimImg from '../assets/new_idle_swim.png';
 import batteryImg from '../assets/battery.png';
+import jellyFishImg from '../assets/jelly_fish.png';
+import jellyChargeImg from '../assets/jelly_charge.png';
 
 // Import normal maps 
 import black_and_blue_nImg from '../assets/tilesets/normal_maps/black_and_blue_n.png';
@@ -96,6 +98,10 @@ export default class LoadingScene extends Phaser.Scene {
             
             // Load enemy assets
             this.load.image('badFish', badFishImg);
+            
+            // Load jellyfish and charge pickup
+            this.load.image('jelly_fish', jellyFishImg);
+            this.load.image('jelly_charge', jellyChargeImg);
             
             // Load all background bubble variations
             this.load.image('bg_bubble1', bgBubble1Img);

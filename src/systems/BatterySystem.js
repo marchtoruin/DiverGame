@@ -21,15 +21,45 @@ export default class BatterySystem {
             { threshold: 0, color: 0xff0000 }   // Red (24-0%)
         ];
 
-        // Listen for battery depleted event
-        this.scene.events.on('batteryDepleted', () => {
+        // Listen for battery-depleted event
+        this.scene.events.on('battery-depleted', () => {
             console.log('Battery depleted event received - turning off flashlight');
             // First update our internal state
             this.isFlashlightOn = false;
-            // Then toggle the flashlight in the lighting system
+            
+            // Then ensure the flashlight is disabled in the lighting system
             if (this.scene.lightingSystem) {
-                this.scene.lightingSystem.toggleFlashlight('flashlight_cone1');
+                // Set flashlightEnabled to false before toggling
+                this.scene.lightingSystem.flashlightEnabled = false;
+                
+                // Force flashlight visual elements to be hidden
+                if (this.scene.lightingSystem.flashlightPointLight) {
+                    this.scene.lightingSystem.flashlightPointLight.setVisible(false);
+                }
+                
+                if (this.scene.lightingSystem.flashlightGlow) {
+                    this.scene.lightingSystem.flashlightGlow.setVisible(false);
+                }
+                
+                // Clear any mask on the overlay
+                if (this.scene.lightingSystem.overlay) {
+                    this.scene.lightingSystem.overlay.clearMask();
+                }
+                
+                console.log('[DEBUG] Forcibly disabled flashlight visuals');
             }
+            
+            // Ensure the flashlight is off in the BatteryMeter
+            if (this.scene.gameSceneUI?.batteryMeter) {
+                this.scene.gameSceneUI.batteryMeter.isFlashlightActive = false;
+            }
+        });
+        
+        // Also listen for batteryDepleted (no hyphen) from BatteryMeter
+        this.scene.events.on('batteryDepleted', () => {
+            console.log('BatteryMeter batteryDepleted event received');
+            // Trigger our standard battery-depleted event to ensure consistency
+            this.scene.events.emit('battery-depleted');
         });
     }
 
@@ -71,9 +101,23 @@ export default class BatterySystem {
         this.isFlashlightOn = false;
         if (this.scene.lightingSystem) {
             // Ensure the flashlight is turned off in the lighting system
-            if (this.scene.lightingSystem.isFlashlightOn) {
-                this.scene.lightingSystem.toggleFlashlight();
+            this.scene.lightingSystem.flashlightEnabled = false;
+            
+            // Directly hide the flashlight visual elements
+            if (this.scene.lightingSystem.flashlightPointLight) {
+                this.scene.lightingSystem.flashlightPointLight.setVisible(false);
             }
+            
+            if (this.scene.lightingSystem.flashlightGlow) {
+                this.scene.lightingSystem.flashlightGlow.setVisible(false);
+            }
+            
+            // Clear any mask on the overlay
+            if (this.scene.lightingSystem.overlay) {
+                this.scene.lightingSystem.overlay.clearMask();
+            }
+            
+            console.log('[DEBUG] Forcibly turned off flashlight');
         }
     }
 

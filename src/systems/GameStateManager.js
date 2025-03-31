@@ -254,9 +254,19 @@ export default class GameStateManager {
      * @param {Object} data - Data related to the game over
      */
     handleGameOver(data) {
-        console.log('Game over');
+        console.log('Game over', data ? `Cause: ${data.cause}` : '');
         
-        // Display game over screen
+        // Ensure game physics are stopped
+        this.scene.physics.pause();
+        
+        // Make sure player is marked as dead to prevent any updates
+        if (this.scene.player && !this.scene.player.isDead) {
+            console.log('Ensuring player is marked as dead');
+            this.scene.player.isDead = true;
+            this.scene.player.active = false;
+        }
+        
+        // Display game over screen with cause information
         this.showGameOverScreen(data);
     }
     

@@ -19,6 +19,8 @@ export default class AirPocketSystem {
         this.pendingOverlapSetup = false;
         this.colliders = [];
         this.processedObjectIds = [];
+        this.respawnTimers = new Map(); // NEW: Track respawn timers for air pockets
+        this.originalDataMap = new Map(); // NEW: Store original air pocket data for respawning
         
         // DEBUGGING: Flag to control debug visualization
         // CRITICAL: DISABLE debug markers entirely - they cause visual bugs
@@ -543,7 +545,8 @@ export default class AirPocketSystem {
             // Extract properties from the object
             let variation = 1;
             let oxygenAmount = 20;
-            let respawnTime = 30; // in seconds
+            let respawnTime = 30; // Default respawn in seconds
+            let timer = null; // Custom timer property in seconds
             
             // Handle Tiled properties (array of {name, value} objects)
             if (obj.properties && Array.isArray(obj.properties)) {
@@ -555,6 +558,9 @@ export default class AirPocketSystem {
                         oxygenAmount = parseInt(prop.value, 10) || 20;
                     } else if (prop.name === 'respawn') {
                         respawnTime = parseInt(prop.value, 10) || 30;
+                    } else if (prop.name === 'timer') {
+                        // Check for the timer property (in seconds)
+                        timer = parseInt(prop.value, 10);
                     }
                 });
             } 
@@ -563,18 +569,24 @@ export default class AirPocketSystem {
                 variation = obj.properties.variation || 1;
                 oxygenAmount = obj.properties.oxygen || 20;
                 respawnTime = obj.properties.respawn || 30;
+                timer = obj.properties.timer; // Get timer property in seconds
             }
             
-            console.log(`Creating air pocket with properties: variation=${variation}, oxygen=${oxygenAmount}, respawn=${respawnTime}s`);
+            // Use timer if specified, otherwise fall back to respawnTime
+            // Both values are converted from seconds to milliseconds
+            const finalRespawnTime = timer !== null ? timer * 1000 : respawnTime * 1000;
             
-            // Create the air pocket
+            console.log(`Creating air pocket with properties: variation=${variation}, oxygen=${oxygenAmount}, respawn=${finalRespawnTime/1000}s`);
+            
+            // Create the air pocket with original object reference for respawning
             const airPocket = this.createAirPocket(
                 obj.x, 
                 obj.y, 
                 {
                     type: variation,
                     oxygenAmount: oxygenAmount,
-                    respawnTime: respawnTime * 1000 // Convert to milliseconds
+                    respawnTime: finalRespawnTime,
+                    originalObj: obj  // Store original object
                 }
             );
             
@@ -591,59 +603,64 @@ export default class AirPocketSystem {
     }
 
     /**
-     * Create an air pocket at the specified location
+     * Create an air pocket at the specified position
      * @param {number} x - X position
-     * @param {number} y - Y position 
-     * @param {Object} config - Configuration for the air pocket
+     * @param {number} y - Y position
+     * @param {Object} options - Configuration options
      * @returns {Object} The created air pocket
      */
-    createAirPocket(x, y, config = {}) {
-        // Validate inputs
-        if (x === undefined || y === undefined) {
-            console.error('Cannot create air pocket: coordinates undefined');
-            return null;
-        }
-        
+    createAirPocket(x, y, options = {}) {
         try {
-            // Set defaults and normalize config
-            const options = {
-                type: parseInt(config.type, 10) || 1,
-                oxygenAmount: parseInt(config.oxygenAmount, 10) || 50,
-                respawnTime: parseInt(config.respawnTime, 10) || 30000,
-                ...config
+            if (!this.scene || !this.scene.add) {
+                console.error('Scene not available for air pocket creation');
+                return null;
+            }
+            
+            // Use options or defaults
+            options = {
+                type: options.type || 1,
+                oxygenAmount: options.oxygenAmount || 20,
+                respawnTime: options.respawnTime || 30000,
+                originalObj: options.originalObj || null  // NEW: Store original object
             };
             
-            // Ensure type is valid (1-3)
-            options.type = Math.max(1, Math.min(3, options.type));
+            // Clamp type between 1 and 3
+            options.type = Phaser.Math.Clamp(options.type, 1, 3);
             
-            // Create sprite based on type
-            const textureKey = `air_pocket${options.type}`;
+            // Generate a unique ID for this air pocket
+            const pocketId = `ap_${x}_${y}_${Date.now()}`;
             
-            // Check if texture exists
-            if (!this.scene.textures.exists(textureKey)) {
-                console.error(`Texture ${textureKey} does not exist!`);
-                
-                // Try fallback to air_pocket1 if available
-                if (this.scene.textures.exists('air_pocket1')) {
-                    const sprite = this.scene.physics.add.sprite(x, y, 'air_pocket1');
-                    return this.finalizeAirPocket(x, y, sprite, options);
-                }
-                
+            // Create a sprite with the appropriate texture
+            const texture = `air_pocket${options.type}`;
+            
+            // Check if texture exists first
+            if (!this.scene.textures.exists(texture)) {
+                console.error(`Air pocket texture '${texture}' does not exist`);
                 return null;
             }
             
-            // Create a SINGLE sprite (not multiple based on type value)
-            const sprite = this.scene.physics.add.sprite(x, y, textureKey);
-            
-            // Skip if sprite creation failed
+            const sprite = this.scene.physics.add.sprite(x, y, texture);
             if (!sprite) {
-                console.error('Failed to create sprite for air pocket');
+                console.error('Failed to create air pocket sprite');
                 return null;
             }
             
-            return this.finalizeAirPocket(x, y, sprite, options);
+            // NEW: Store original data for respawning
+            this.originalDataMap.set(pocketId, {
+                x,
+                y,
+                options
+            });
+            
+            // Set unique ID on the sprite for respawning
+            sprite.airPocketId = pocketId;
+            
+            // Finalize and configure the air pocket
+            const airPocket = this.finalizeAirPocket(x, y, sprite, options);
+            
+            return airPocket;
         } catch (error) {
-            console.error(`Error creating air pocket at (${x}, ${y}):`, error);
+            console.error('Error creating air pocket:', error);
             return null;
         }
     }
@@ -677,7 +694,7 @@ export default class AirPocketSystem {
                 sprite,
                 type: options.type,
                 oxygenAmount: options.oxygenAmount,
-                respawnTime: 30000, // Force 30 seconds respawn time for all air pockets
+                respawnTime: options.respawnTime, // NEW: Use the custom respawn time
                 lastCollectTime: 0,
                 active: true,
                 isDestroyed: false,
@@ -947,6 +964,9 @@ export default class AirPocketSystem {
                 const originalX = instance.x;
                 const originalY = instance.y;
                 
+                // Get the air pocket ID
+                const pocketId = airPocket.airPocketId;
+                
                 // Deactivate the air pocket
                 instance.active = false;
                 instance.isDestroyed = true;
@@ -964,13 +984,32 @@ export default class AirPocketSystem {
                     instance.particles = null;
                 }
                 
-                // Start respawn timer (30 seconds)
+                // Start respawn timer using the custom time or default
                 if (this.scene) {
-                    console.log('Starting 30 second respawn timer for air pocket');
-                    instance.respawnTimer = this.scene.time.delayedCall(30000, () => {
-                        // Pass original coordinates to respawn
-                        this.respawnAirPocket(instance, originalX, originalY);
+                    // Get the respawn time
+                    const respawnTime = instance.respawnTime || 30000; // Default 30 seconds
+                    
+                    console.log(`Starting air pocket respawn timer for ${respawnTime/1000} seconds`);
+                    
+                    // Cancel any existing timer for this pocket
+                    if (this.respawnTimers.has(pocketId)) {
+                        this.respawnTimers.get(pocketId).remove();
+                    }
+                    
+                    // Create a new timer
+                    const timerEvent = this.scene.time.delayedCall(respawnTime, () => {
+                        // Only respawn if system is still active
+                        if (!this.active) return;
+                        
+                        // Pass original data to respawn function
+                        this.respawnAirPocket(pocketId, originalX, originalY);
+                        
+                        // Clean up the timer
+                        this.respawnTimers.delete(pocketId);
                     });
+                    
+                    // Store the timer reference
+                    this.respawnTimers.set(pocketId, timerEvent);
                 }
             }
         } catch (error) {
@@ -980,37 +1019,44 @@ export default class AirPocketSystem {
 
     /**
      * Respawn an air pocket
-     * @param {Object} instance - The air pocket instance to respawn
-     * @param {number} originalX - Original X position to respawn at
-     * @param {number} originalY - Original Y position to respawn at
+     * @param {string} pocketId - The ID of the air pocket to respawn
+     * @param {number} x - X position to respawn at
+     * @param {number} y - Y position to respawn at
      */
-    respawnAirPocket(instance, originalX, originalY) {
-        if (!instance) return;
-        
-        // Reset position to original spawn point
-        if (originalX !== undefined && originalY !== undefined) {
-            instance.x = originalX;
-            instance.y = originalY;
-        }
-        
-        instance.active = true;
-        instance.isDestroyed = false;
-        
-        if (instance.sprite) {
-            // Reset sprite position
-            instance.sprite.setPosition(instance.x, instance.y);
-            instance.sprite.setVisible(true);
-            if (instance.sprite.body) {
-                instance.sprite.body.enable = true;
-                // Reset physics properties
-                instance.sprite.body.setVelocity(0, 0);
-                instance.sprite.body.setAcceleration(0, 0);
+    respawnAirPocket(pocketId, x, y) {
+        try {
+            // Get the original data
+            const originalData = this.originalDataMap.get(pocketId);
+            
+            if (originalData) {
+                console.log(`Respawning air pocket from original data at (${originalData.x}, ${originalData.y})`);
+                
+                // Create a new air pocket with the original data
+                this.createAirPocket(
+                    originalData.x,
+                    originalData.y,
+                    originalData.options
+                );
+                
+                return;
             }
             
-            // Recreate the visual effects including particles
-            this.addVisualEffects(instance);
+            // Fallback if no original data: create with basic settings at the provided position
+            console.log(`Respawning air pocket at (${x}, ${y}) with default settings`);
             
-            console.log(`Air pocket respawned at original position (${instance.x}, ${instance.y})`);
+            const airPocket = this.createAirPocket(x, y, {
+                type: 1,
+                oxygenAmount: 20,
+                respawnTime: 30000
+            });
+            
+            if (airPocket) {
+                console.log('Air pocket respawned successfully');
+            } else {
+                console.error('Failed to respawn air pocket');
+            }
+        } catch (error) {
+            console.error('Error respawning air pocket:', error);
         }
     }
 
@@ -1062,61 +1108,48 @@ export default class AirPocketSystem {
     }
 
     /**
-     * Update the air pocket system
+     * Update all air pockets
      * @param {number} time - Current game time
      */
     update(time) {
-        // Only update at fixed intervals to reduce CPU impact
-        if (this.lastUpdateTime && time - this.lastUpdateTime < 100) {
+        // Skip if no air pockets
+        if (!this.airPockets || this.airPockets.length === 0 || !time) {
             return;
         }
-        this.lastUpdateTime = time;
         
-        // Update air pocket physics
+        // Run validation check periodically
+        if (!this.lastValidationTime || time - this.lastValidationTime > 5000) {
+            this.validateAirPockets();
+            this.lastValidationTime = time;
+        }
+        
+        // Setup player overlap if needed
+        if (this.pendingOverlapSetup && this.player?.sprite) {
+            this.setupPlayerOverlap(this.player);
+        }
+        
+        // Update each air pocket
         this.airPockets.forEach(airPocket => {
-            // Skip destroyed or inactive air pockets
-            if (!airPocket || !airPocket.active || airPocket.isDestroyed) {
-                return;
-            }
-            
-            const sprite = airPocket.sprite;
-            if (!sprite || !sprite.body) return;
-            
-            // Handle air pockets that have collided with obstacles
-            if (airPocket.hasCollided) {
-                // CRITICAL: Ensure collided air pockets remain in place
-                sprite.body.setVelocity(0, 0);
-                sprite.body.setAcceleration(0, 0);
-                sprite.body.immovable = true;
-                
-                // CRITICAL: Double check sprite is visible and active
-                if (!sprite.visible || !sprite.active) {
-                    // console.log(`Ensuring collided air pocket remains visible at (${airPocket.x}, ${airPocket.y})`);
-                    sprite.setVisible(true);
-                    sprite.setActive(true);
-                    sprite.body.enable = true;
-                }
-            } else {
-                // Only apply upward movement to non-collided air pockets
-                // Check if we need to refresh the upward velocity
-                // Air pockets should continue to move upward until they hit an obstacle
-                if (sprite.body.velocity.y > -20) {
-                    sprite.body.setVelocityY(-70); // Stronger upward movement
+            if (airPocket && airPocket.active) {
+                // Call update method if it exists
+                if (typeof airPocket.update === 'function') {
+                    airPocket.update(time);
                 }
                 
-                // Add a slight random horizontal wobble
-                if (Math.random() < 0.1) {
-                    const wobble = Phaser.Math.Between(-25, 25);
-                    sprite.body.setVelocityX(wobble);
+                // Otherwise, apply standard movement if needed
+                else if (airPocket.sprite && airPocket.sprite.body && !airPocket.hasCollided) {
+                    // Apply slight wobble effect
+                    if (Math.random() < 0.1) {
+                        airPocket.sprite.body.velocity.x += Math.random() * 10 - 5;
+                    }
+                    
+                    // Ensure upward movement
+                    if (airPocket.sprite.body.velocity.y > -20) {
+                        airPocket.sprite.body.velocity.y = -50;
+                    }
                 }
             }
         });
-        
-        // Check for bugs in the air pocket system every 5 seconds
-        const checkInterval = 5000;
-        if (!this.lastValidationTime || time - this.lastValidationTime > checkInterval) {
-            this.validateAirPockets();
-        }
     }
     
     /**
@@ -1204,51 +1237,94 @@ export default class AirPocketSystem {
     }
 
     /**
-     * Clean up resources
+     * Clean up the air pocket system
      */
     destroy() {
-        // Clean up debug visuals
-        if (this.debugGraphics) {
-            this.debugGraphics.clear();
-            this.debugGraphics.destroy();
-            this.debugGraphics = null;
-        }
-        this.clearDebugTexts();
-        
-        // Clean up colliders
-        if (this.colliders) {
-            this.colliders.forEach(collider => {
-                if (collider) this.scene.physics.world.removeCollider(collider);
-            });
-            this.colliders = [];
-        }
-        
-        // Clean up physics group
-        if (this.group) {
-            this.group.clear(true, true);
-            this.group = null;
-        }
-        
-        // Clean up collect effects
-        if (this.collectEffects) {
-            this.collectEffects.forEach(effect => {
-                if (effect && effect.destroy) effect.destroy();
-            });
-            this.collectEffects = [];
-        }
-        
-        // Clean up air pockets
-        if (this.airPockets) {
-            this.airPockets.forEach(airPocket => {
-                if (airPocket && airPocket.destroy) {
-                    airPocket.destroy();
+        try {
+            // Stop all timers first
+            if (this.validationTimer) {
+                this.validationTimer.remove();
+                this.validationTimer = null;
+            }
+            
+            // NEW: Cancel all respawn timers
+            for (const timerEvent of this.respawnTimers.values()) {
+                if (timerEvent) {
+                    timerEvent.remove();
                 }
-            });
-            this.airPockets = [];
+            }
+            this.respawnTimers.clear();
+            this.originalDataMap.clear();
+            
+            // Clean up colliders
+            if (this.colliders && this.colliders.length > 0) {
+                this.colliders.forEach(collider => {
+                    if (collider && collider.active) {
+                        collider.destroy();
+                    }
+                });
+                this.colliders = [];
+            }
+            
+            // Remove event listeners
+            this.scene.events.off('tilemapCreated');
+            this.scene.events.off('mapObjectsReady');
+            
+            // Remove the preupdate event listener we added for high-speed overlap detection
+            this.scene.events.off('preupdate', this.checkManualOverlap, this);
+            
+            // Destroy all emitters
+            if (this.bubbleEmitters) {
+                this.bubbleEmitters.forEach(emitter => {
+                    if (emitter && emitter.destroy) {
+                        emitter.destroy();
+                    }
+                });
+                this.bubbleEmitters = [];
+            }
+            
+            // Destroy all effects
+            if (this.collectEffects) {
+                this.collectEffects.forEach(emitter => {
+                    if (emitter && emitter.destroy) {
+                        emitter.destroy();
+                    }
+                });
+                this.collectEffects = [];
+            }
+            
+            // Destroy all air pockets
+            if (this.airPockets) {
+                this.airPockets.forEach(airPocket => {
+                    if (airPocket && typeof airPocket.destroy === 'function') {
+                        airPocket.destroy();
+                    }
+                });
+                this.airPockets = [];
+            }
+            
+            // Destroy the group
+            if (this.group) {
+                this.group.destroy(true);
+                this.group = null;
+            }
+            
+            // Clean up debug graphics
+            if (this.debugGraphics) {
+                this.debugGraphics.clear();
+                this.debugGraphics.destroy();
+                this.debugGraphics = null;
+            }
+            
+            this.clearDebugTexts();
+            
+            // Clear reference to player
+            this.player = null;
+            
+            console.log('AirPocketSystem cleaned up successfully');
+        } catch (error) {
+            console.error('Error destroying AirPocketSystem:', error);
         }
-        
-        // Clear references
-        this.player = null;
     }
 
     /**
@@ -1326,6 +1402,9 @@ export default class AirPocketSystem {
                 this.colliders.push(newCollider);
                 // console.log('Successfully set up air pocket overlap detection');
                 this.pendingOverlapSetup = false;
+                
+                // Add additional manual overlap check for high-speed movement
+                this.scene.events.on('preupdate', this.checkManualOverlap, this);
             } else {
                 // console.error('Failed to create air pocket overlap detector');
             }
@@ -1335,6 +1414,16 @@ export default class AirPocketSystem {
                 if (ap.sprite && ap.sprite.body) {
                     // Ensure the body is enabled
                     ap.sprite.body.enable = true;
+                    
+                    // Make the air pocket's body slightly larger for better collision detection
+                    const bodyWidth = ap.sprite.width * 1.5;  // 50% larger
+                    const bodyHeight = ap.sprite.height * 1.5; // 50% larger
+                    ap.sprite.body.setSize(bodyWidth, bodyHeight);
+                    ap.sprite.body.setOffset(
+                        (ap.sprite.width - bodyWidth) / 2,
+                        (ap.sprite.height - bodyHeight) / 2
+                    );
+                    
                     // console.log(`Air pocket ${i} physics body: enabled=${ap.sprite.body.enable}, immovable=${ap.sprite.body.immovable}`);
                 } else {
                     // console.warn(`Air pocket ${i} at (${ap.x}, ${ap.y}) has no physics body!`);
@@ -1342,6 +1431,89 @@ export default class AirPocketSystem {
             });
         } catch (error) {
             console.error('Error setting up player-air pocket overlap:', error);
+        }
+    }
+
+    /**
+     * Manual overlap check to catch high-speed tunneling
+     * This runs on each pre-update to catch cases where the player might tunnel through air pockets
+     */
+    checkManualOverlap() {
+        if (!this.player || !this.player.sprite || !this.player.active || !this.airPockets || this.airPockets.length === 0) {
+            return;
+        }
+        
+        // Get player position and velocity
+        const playerSprite = this.player.sprite;
+        const playerX = playerSprite.x;
+        const playerY = playerSprite.y;
+        const playerVelocity = playerSprite.body ? playerSprite.body.velocity : { x: 0, y: 0 };
+        const playerSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.y * playerVelocity.y);
+        
+        // Only perform expensive checks when player is moving at high speed (boosting)
+        if (playerSpeed > 300) {
+            // Store player's last position if not already tracked
+            if (!this._lastPlayerPos) {
+                this._lastPlayerPos = { x: playerX, y: playerY };
+                return;
+            }
+            
+            // Calculate direction of movement
+            const moveX = playerX - this._lastPlayerPos.x;
+            const moveY = playerY - this._lastPlayerPos.y;
+            const moveDist = Math.sqrt(moveX * moveX + moveY * moveY);
+            
+            // Only check if there was significant movement
+            if (moveDist > 10) {
+                // Normalize movement vector
+                const dirX = moveX / moveDist;
+                const dirY = moveY / moveDist;
+                
+                // Check each air pocket
+                for (let i = 0; i < this.airPockets.length; i++) {
+                    const airPocket = this.airPockets[i];
+                    if (!airPocket || !airPocket.sprite || !airPocket.active) continue;
+                    
+                    const airPocketSprite = airPocket.sprite;
+                    
+                    // Calculate distance to the air pocket
+                    const dx = airPocketSprite.x - playerX;
+                    const dy = airPocketSprite.y - playerY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // If the air pocket is within a reasonable range
+                    if (distance < 200) {
+                        // Project the player's movement onto the vector to the air pocket
+                        const dotProduct = dx * dirX + dy * dirY;
+                        
+                        // If the player is moving toward the air pocket
+                        if (dotProduct < 0) {
+                            // Distance from player's path to the air pocket center
+                            const projectX = playerX + dotProduct * dirX;
+                            const projectY = playerY + dotProduct * dirY;
+                            const perpDx = airPocketSprite.x - projectX;
+                            const perpDy = airPocketSprite.y - projectY;
+                            const perpDistSq = perpDx * perpDx + perpDy * perpDy;
+                            
+                            // Check if the player's path passes close to the air pocket
+                            const collisionRadius = (airPocketSprite.width / 2 + playerSprite.width / 2) * 1.2;
+                            if (perpDistSq < collisionRadius * collisionRadius) {
+                                // Check if this air pocket was hit recently to avoid double processing
+                                const now = this.scene.time.now;
+                                if (!airPocket.lastHitTime || (now - airPocket.lastHitTime > 500)) {
+                                    console.log("Manual overlap detected with air pocket during high-speed movement");
+                                    airPocket.lastHitTime = now;
+                                    this.handlePlayerAirPocketOverlap(this.player, airPocketSprite);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Update player's last position
+            this._lastPlayerPos.x = playerX;
+            this._lastPlayerPos.y = playerY;
         }
     }
 
@@ -1662,56 +1834,33 @@ export default class AirPocketSystem {
 
     /**
      * Process air pockets from the map
-     * @param {Array} objects - Array of objects from the map
+     * @param {Array} objects - Air pocket objects from the map
      */
     processAirPockets(objects) {
         // Skip if no objects provided
-        if (!objects || !Array.isArray(objects)) return;
+        if (!objects || !Array.isArray(objects) || objects.length === 0) {
+            console.log('No air pocket objects to process');
+            return;
+        }
         
-        // Clear any existing air pockets first
-        this.airPockets = [];
-        this.processedObjectIds = [];
-        
-        // Only process objects that:
-        // 1. Come from the AirPockets layer
-        // 2. Have valid coordinates
-        // 3. Are not enemy spawn points (no "Type" in name)
-        
+        // Filter out non-air pocket objects
         const validAirPocketObjects = objects.filter(obj => {
-            // Skip any objects with "Type" in the name or from Lighting layer
+            // Skip objects with 'Type' in the name (those are enemy spawns)
             if (obj.name && obj.name.includes('Type')) {
                 return false;
             }
             
-            // Skip any objects from the Lighting layer (check layerName if available)
-            if (obj.layerName && 
-                (obj.layerName === 'Lighting' || 
-                 obj.layerName === 'lighting' || 
-                 obj.layerName.toLowerCase().includes('lighting'))) {
+            // Skip objects already processed
+            if (obj.id && this.processedObjectIds.includes(obj.id)) {
                 return false;
             }
             
-            // Skip if object doesn't have coordinates
+            // Skip objects without positions
             if (obj.x === undefined || obj.y === undefined) {
                 return false;
             }
             
-            // LOOSER NAME REQUIREMENTS:
-            // If object is in AirPockets layer, accept:
-            // - any object named 'air_pocket' 
-            // - any object named 'airpocket' (no underscore)
-            // - any unnamed object (empty name)
-            if (obj.layerName === 'AirPockets') {
-                if (!obj.name || obj.name === '' || 
-                    obj.name === 'air_pocket' || 
-                    obj.name.toLowerCase() === 'airpocket') {
-                    return true;
-                }
-                return false;
-            }
-            
-            // If not in AirPockets layer, must be explicitly named air_pocket
-            return obj.name === 'air_pocket';
+            return true;
         });
         
         console.log(`Processing ${validAirPocketObjects.length} valid air pocket objects`);
@@ -1732,13 +1881,23 @@ export default class AirPocketSystem {
                 // Use default values if properties are missing
                 const oxygen = props.oxygen || 50;
                 const variation = props.variation || 1;
-                const respawn = props.respawn ? props.respawn * 1000 : 30000;
+                
+                // Check for the timer property in seconds
+                let respawnMs;
+                if (props.timer !== undefined) {
+                    // Use timer property directly (in seconds) and convert to milliseconds
+                    respawnMs = props.timer * 1000;
+                } else {
+                    // Fall back to respawn property (also in seconds) and convert to milliseconds
+                    respawnMs = props.respawn ? props.respawn * 1000 : 30000;
+                }
                 
                 // Create the air pocket
                 this.createAirPocket(obj.x, obj.y, {
                     type: variation,
                     oxygenAmount: oxygen,
-                    respawnTime: respawn
+                    respawnTime: respawnMs,
+                    originalObj: obj  // Store original object
                 });
                 
                 // Store the ID to prevent duplicate processing
@@ -1830,5 +1989,101 @@ export default class AirPocketSystem {
         if (this.group) {
             this.group.clear(true, true);
         }
+    }
+
+    /**
+     * Toggle visualization of air pocket physics bodies
+     * @param {boolean} show - Whether to show physics bodies
+     */
+    showPhysicsBodies(show = true) {
+        try {
+            // Skip if no air pockets
+            if (!this.airPockets || this.airPockets.length === 0) {
+                return;
+            }
+            
+            // Clean up any existing debug graphics
+            if (this._debugPhysics) {
+                this._debugPhysics.clear();
+                this._debugPhysics.destroy();
+                this._debugPhysics = null;
+            }
+            
+            // Exit early if we're turning visualization off
+            if (!show) {
+                return;
+            }
+            
+            // Create a new graphics object for physics debugging
+            this._debugPhysics = this.scene.add.graphics();
+            this._debugPhysics.setDepth(1000); // Make sure it's on top
+            
+            // Draw each air pocket's physics body
+            this.airPockets.forEach(airPocket => {
+                if (!airPocket || !airPocket.sprite || !airPocket.sprite.body) {
+                    return;
+                }
+                
+                const sprite = airPocket.sprite;
+                const body = sprite.body;
+                
+                // Draw the physics body outline
+                this._debugPhysics.lineStyle(2, 0xff00ff, 0.7);
+                
+                // If it's a circle
+                if (body.isCircle) {
+                    const radius = body.radius;
+                    const centerX = sprite.x;
+                    const centerY = sprite.y;
+                    this._debugPhysics.strokeCircle(centerX, centerY, radius);
+                } 
+                // If it's a rectangle
+                else {
+                    const x = sprite.x - (sprite.displayWidth * sprite.originX) + body.offset.x;
+                    const y = sprite.y - (sprite.displayHeight * sprite.originY) + body.offset.y;
+                    this._debugPhysics.strokeRect(x, y, body.width, body.height);
+                }
+                
+                // Add a path line showing movement vector
+                if (body.velocity.x !== 0 || body.velocity.y !== 0) {
+                    const speed = Math.sqrt(body.velocity.x * body.velocity.x + body.velocity.y * body.velocity.y);
+                    const dirX = body.velocity.x / speed;
+                    const dirY = body.velocity.y / speed;
+                    
+                    this._debugPhysics.lineStyle(1, 0x00ffff, 0.5);
+                    this._debugPhysics.beginPath();
+                    this._debugPhysics.moveTo(sprite.x, sprite.y);
+                    this._debugPhysics.lineTo(
+                        sprite.x + dirX * 50,
+                        sprite.y + dirY * 50
+                    );
+                    this._debugPhysics.strokePath();
+                }
+            });
+            
+            // Update physics visualization once a second
+            this.scene.time.addEvent({
+                delay: 1000,
+                callback: () => this.updatePhysicsVisualization(),
+                callbackScope: this,
+                loop: true
+            });
+            
+            console.log(`Air pocket physics visualization ${show ? 'enabled' : 'disabled'}`);
+        } catch (error) {
+            console.error('Error toggling physics visualization:', error);
+        }
+    }
+    
+    /**
+     * Update the physics visualization
+     */
+    updatePhysicsVisualization() {
+        if (!this._debugPhysics || !this.airPockets) {
+            return;
+        }
+        
+        // Redraw with updated positions
+        this.showPhysicsBodies(true);
     }
 } 

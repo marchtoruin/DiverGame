@@ -15,6 +15,9 @@ export default class Bullet extends Phaser.Physics.Arcade.Sprite {
         this.setVisible(false);
         this.setScale(0.5);
         
+        // IMPORTANT: Set origin to center for proper rotation
+        this.setOrigin(0.5, 0.5);
+        
         // IMPORTANT: Set depth higher than the darkness overlay (which is at 900)
         // This makes bullets appear on top of the darkness
         this.setDepth(950);
@@ -40,6 +43,7 @@ export default class Bullet extends Phaser.Physics.Arcade.Sprite {
             .setScale(1.2)
             .setTint(0xffff99) // Yellowish tint for better visibility
             .setVisible(false)
+            .setOrigin(0.5, 0.5) // IMPORTANT: Match bullet's origin
             // IMPORTANT: Set glow depth just below bullet but above darkness
             .setDepth(949);
             
@@ -59,7 +63,7 @@ export default class Bullet extends Phaser.Physics.Arcade.Sprite {
         // Reset bullet position
         this.body.reset(x, y);
         
-        // Activate bullet and set velocity
+        // Activate bullet and set visibility
         this.setActive(true);
         this.setVisible(true);
         
@@ -70,9 +74,38 @@ export default class Bullet extends Phaser.Physics.Arcade.Sprite {
         }
         
         // Apply velocity based on direction
-        const speed = direction > 0 ? this.speed : -this.speed;
-        this.setVelocityX(speed);
-        this.setVelocityY(0);
+        if (typeof direction === 'object' && direction.x !== undefined && direction.y !== undefined) {
+            // Calculate angle from direction vector
+            const angle = Math.atan2(direction.y, direction.x);
+            
+            // Set velocity using raw angle - this controls actual movement
+            this.setVelocityX(Math.cos(angle) * this.speed);
+            this.setVelocityY(Math.sin(angle) * this.speed);
+            
+            // Set visual rotation - use raw angle directly without any additional adjustments
+            this.setRotation(angle);
+            
+            // Apply the same rotation to the glow effect
+            if (this.glow) {
+                this.glow.setRotation(angle);
+            }
+
+            // Safe debug logging
+            if (this.scene?.game?.config?.physics?.debug || this.scene?.physics?.config?.debug) {
+                console.log(`Bullet fired - angle: ${Phaser.Math.RadToDeg(angle).toFixed(1)}°, ` +
+                           `velocity: (${this.body.velocity.x.toFixed(1)}, ${this.body.velocity.y.toFixed(1)})`);
+            }
+        } else {
+            // Legacy support for simple left/right direction
+            const speed = direction > 0 ? this.speed : -this.speed;
+            this.setVelocityX(speed);
+            this.setVelocityY(0);
+            this.setRotation(direction > 0 ? 0 : Math.PI);
+            
+            if (this.glow) {
+                this.glow.setRotation(direction > 0 ? 0 : Math.PI);
+            }
+        }
         
         // Reset lifespan timer
         this.lifespan = 1000; // reset to full lifespan

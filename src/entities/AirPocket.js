@@ -9,51 +9,23 @@ export default class AirPocket {
      * @param {Phaser.Scene} scene - The game scene
      * @param {number} x - X position
      * @param {number} y - Y position
-     * @param {number|Object} variation - Variation of air pocket (1-3) or config object
+     * @param {number} variation - Air pocket variation (1-3)
+     * @param {Object} options - Additional options
      */
-    constructor(scene, x, y, variation = 1) {
+    constructor(scene, x, y, variation = 1, options = {}) {
         this.scene = scene;
         this.x = x;
         this.y = y;
-        
-        // Handle if variation is passed as an object with config properties
-        let config = {};
-        if (typeof variation === 'object') {
-            config = variation;
-            this.variation = Math.min(Math.max(config.type || 1, 1), 3); // Clamp between 1-3
-            this.oxygenAmount = config.oxygenAmount || 25;
-            
-            // Handle respawn time - convert from seconds to milliseconds if needed
-            if (config.respawn !== undefined) {
-                // Convert seconds to milliseconds
-                this.respawnTime = config.respawn * 1000;
-                console.log(`Setting respawn time to ${this.respawnTime}ms (${config.respawn} seconds)`);
-            } else {
-                this.respawnTime = 10000; // Default 10 seconds
-            }
-        } else {
-            this.variation = Math.min(Math.max(variation, 1), 3); // Clamp between 1-3
-            
-            // Default property values
-            this.oxygenAmount = 25; // Default amount of oxygen to give
-            this.respawnTime = 10000; // 10 seconds
-            
-            // Adjust oxygen amount based on variation
-            if (this.variation === 2) {
-                this.oxygenAmount = 35;
-            } else if (this.variation === 3) {
-                this.oxygenAmount = 50;
-            }
-        }
-        
-        // Air pocket properties
-        this.sprite = null;
+        this.variation = variation;
         this.active = true;
+        this.hasCollided = false;
+        this.isDestroyed = false;
+        this.sprite = null;
+        this.particles = null;
+        this.updateTimer = null;
         this.respawnTimer = null;
-        this.hasCollided = false; // Track if it has collided with obstacles
-        this.isDestroyed = false; // Track if it has been destroyed by collection
-        
-        console.log(`AirPocket created with variation ${this.variation}, oxygen ${this.oxygenAmount}, respawn ${this.respawnTime/1000}s`);
+        this.oxygenAmount = options.oxygenAmount || 20;
+        this.respawnTime = options.respawnTime || 30000; // 30 seconds
     }
     
     /**
@@ -62,60 +34,66 @@ export default class AirPocket {
      */
     create() {
         try {
-            // Create the sprite based on variation
-            const textureKey = `air_pocket${this.variation}`;
-            this.sprite = this.scene.add.sprite(this.x, this.y, textureKey);
+            // Pick the appropriate texture
+            const textureName = `air_pocket${this.variation}`;
             
-            // Set an extremely small scale
-            this.sprite.setScale(0.02);  // Drastically reduced scale
+            // Create sprite
+            this.sprite = this.scene.physics.add.sprite(this.x, this.y, textureName);
+            this.sprite.airPocketInstance = this; // Reference back to this instance
+            this.sprite.setScale(0.5); // Smaller visual appearance
             
-            // Enable physics
-            this.scene.physics.world.enable(this.sprite);
-            
-            // Store reference to this instance on the sprite
-            this.sprite.airPocketInstance = this;
-
-            // Set up physics properties
+            // Make physics body larger than visual sprite for better collision detection
+            // This helps prevent high-speed tunneling
             if (this.sprite.body) {
-                // Set up circular physics body for better interaction
-                // Tiny collision radius to match new visual size
-                const bodyRadius = 8;  // Very small collision radius
+                // Make the physics body significantly larger than the visual sprite
+                // This gives a much bigger target for high-speed players to hit
+                const bodyWidth = this.sprite.width * 2.0;  // Double size
+                const bodyHeight = this.sprite.height * 2.0; // Double size
                 
-                this.sprite.body.setCircle(bodyRadius);
-                
-                // Set the offset to center the collision circle
+                this.sprite.body.setSize(bodyWidth, bodyHeight);
                 this.sprite.body.setOffset(
-                    this.sprite.width / 2 - bodyRadius,
-                    this.sprite.height / 2 - bodyRadius
+                    (this.sprite.width - bodyWidth) / 2,
+                    (this.sprite.height - bodyHeight) / 2
                 );
-
-                // Disable gravity and set up movement properties
-                this.sprite.body.setAllowGravity(false);
-                this.sprite.body.setBounce(0.1, 0.1);
-                this.sprite.body.setFriction(0, 0);
-                this.sprite.body.setDrag(20, 20);
-
-                // Give it a slight initial velocity
-                this.sprite.body.setVelocity(
-                    Phaser.Math.Between(-20, 20),
-                    -40 // Upward movement
-                );
+                
+                // Non-immovable so it can float
+                this.sprite.body.immovable = false;
+                
+                // Disable gravity - we'll use our own movement
+                this.sprite.body.allowGravity = false;
+                
+                // Add slight bounce for visual effect
+                this.sprite.body.bounce.set(0.4);
+                
+                // Give a slight upward velocity to make it float
+                this.sprite.body.velocity.y = -75;
             }
-
-            // Add subtle pulsing animation
-            this.scene.tweens.add({
-                targets: this.sprite,
-                scale: { from: 0.02, to: 0.022 },  // Very small scale range
-                duration: 1000,
-                yoyo: true,
-                repeat: -1,
-                ease: 'Sine.easeInOut'
-            });
             
             return this.sprite;
         } catch (error) {
-            console.error('Error creating air pocket sprite:', error);
+            console.error('Error creating air pocket:', error);
             return null;
+        }
+    }
+    
+    /**
+     * Update the air pocket
+     * @param {number} time - Current game time
+     */
+    update(time) {
+        if (!this.active || !this.sprite) return;
+        
+        // Add wobble effect
+        if (this.sprite.body && !this.hasCollided) {
+            // Random horizontal movement for realism
+            if (Math.random() < 0.1) {
+                this.sprite.body.velocity.x += Phaser.Math.Between(-10, 10);
+            }
+            
+            // Ensure upward movement continues
+            if (this.sprite.body.velocity.y > -25) {
+                this.sprite.body.velocity.y = -75;
+            }
         }
     }
     
@@ -232,14 +210,26 @@ export default class AirPocket {
      * Clean up resources
      */
     destroy() {
+        if (this.updateTimer) {
+            this.updateTimer.remove();
+            this.updateTimer = null;
+        }
+        
         if (this.respawnTimer) {
             this.respawnTimer.remove();
             this.respawnTimer = null;
+        }
+        
+        if (this.particles) {
+            this.particles.destroy();
+            this.particles = null;
         }
         
         if (this.sprite) {
             this.sprite.destroy();
             this.sprite = null;
         }
+        
+        this.active = false;
     }
 } 

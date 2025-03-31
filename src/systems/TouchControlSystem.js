@@ -34,6 +34,13 @@ export default class TouchControlSystem {
                 zoneRadius: 90,
                 color: 0x00ff00
             },
+            flashlight: {
+                x: this.scene.cameras.main.width - 120,
+                y: this.scene.cameras.main.height - 300, // Position above boost button
+                radius: 50,
+                zoneRadius: 80,
+                color: 0xffcc00 // Yellow color for flashlight
+            },
             depths: {
                 base: 1000,
                 controls: 1001,
@@ -48,6 +55,7 @@ export default class TouchControlSystem {
     initialize() {
         this.createJoystick();
         this.createBoostButton();
+        this.createFlashlightButton();
         this.setupEventListeners();
         this.setVisible(this.enabled);
         console.log('Touch control system initialized');
@@ -168,11 +176,61 @@ export default class TouchControlSystem {
     }
 
     /**
+     * Create the flashlight button UI elements
+     */
+    createFlashlightButton() {
+        const cfg = this.config.flashlight;
+
+        // Create flashlight zone
+        const zone = this.scene.add.circle(cfg.x, cfg.y, cfg.zoneRadius, cfg.color, 0.1);
+        zone.setStrokeStyle(2, cfg.color, 0.1);
+        zone.setScrollFactor(0);
+        zone.setDepth(this.config.depths.base);
+        zone.setInteractive({ useHandCursor: true });
+        this.elements.set('flashlightZone', zone);
+
+        // Create glow effect
+        const glow = this.scene.add.circle(cfg.x, cfg.y, cfg.radius + 20, cfg.color, 0.1);
+        glow.setStrokeStyle(6, cfg.color, 0.3);
+        glow.setScrollFactor(0);
+        glow.setDepth(this.config.depths.base);
+        this.elements.set('flashlightGlow', glow);
+
+        // Create button (outline only)
+        const button = this.scene.add.circle(cfg.x, cfg.y, cfg.radius);
+        button.setStrokeStyle(4, cfg.color, 0.8);
+        button.setScrollFactor(0);
+        button.setDepth(this.config.depths.controls);
+        this.elements.set('flashlightButton', button);
+
+        // Create flashlight icon
+        const icon = this.scene.add.text(cfg.x, cfg.y - 5, '🔦', {
+            font: 'bold 36px Arial',
+            color: '#ffffff'
+        }).setOrigin(0.5);
+        icon.setScrollFactor(0);
+        icon.setDepth(this.config.depths.text);
+        this.elements.set('flashlightIcon', icon);
+
+        // Create text
+        const text = this.scene.add.text(cfg.x, cfg.y + 30, 'LIGHT', {
+            font: 'bold 20px Arial',
+            color: '#ffffff',
+            stroke: '#ffcc00',
+            strokeThickness: 2
+        }).setOrigin(0.5);
+        text.setScrollFactor(0);
+        text.setDepth(this.config.depths.text);
+        this.elements.set('flashlightText', text);
+    }
+
+    /**
      * Set up event listeners for touch controls
      */
     setupEventListeners() {
         const joystickZone = this.elements.get('joystickZone');
         const boostZone = this.elements.get('boostZone');
+        const flashlightZone = this.elements.get('flashlightZone');
 
         // Joystick events
         joystickZone.on('pointerdown', this.handleJoystickDown.bind(this));
@@ -184,6 +242,10 @@ export default class TouchControlSystem {
         boostZone.on('pointerdown', this.handleBoostDown.bind(this));
         boostZone.on('pointerup', this.handleBoostUp.bind(this));
         boostZone.on('pointerout', this.handleBoostUp.bind(this));
+
+        // Flashlight events
+        flashlightZone.on('pointerdown', this.handleFlashlightDown.bind(this));
+        flashlightZone.on('pointerup', this.handleFlashlightUp.bind(this));
 
         // Handle resize
         this.scene.scale.on('resize', this.handleResize, this);
@@ -331,104 +393,180 @@ export default class TouchControlSystem {
     }
 
     /**
-     * Handle window resize
+     * Handle flashlight button down
+     */
+    handleFlashlightDown() {
+        // Visual feedback
+        this.elements.get('flashlightButton').setFillStyle(this.config.flashlight.color, 0.6);
+        this.elements.get('flashlightGlow').setAlpha(0.5);
+        this.elements.get('flashlightText').setScale(0.9);
+        this.elements.get('flashlightIcon').setScale(0.9);
+    }
+
+    /**
+     * Handle flashlight button up/out
+     */
+    handleFlashlightUp() {
+        // Reset visual state
+        this.elements.get('flashlightButton').setFillStyle(this.config.flashlight.color, 0.3);
+        this.elements.get('flashlightGlow').setAlpha(0.1);
+        this.elements.get('flashlightText').setScale(1);
+        this.elements.get('flashlightIcon').setScale(1);
+        
+        // Toggle the flashlight
+        if (this.scene.lightingSystem) {
+            this.scene.lightingSystem.toggleFlashlight('flashlight_cone1');
+            console.log('TouchControlSystem: Flashlight toggled via touch');
+        }
+    }
+
+    /**
+     * Handle window resize event
      */
     handleResize() {
         const width = this.scene.cameras.main.width;
         const height = this.scene.cameras.main.height;
-
-        // Update config positions
-        this.config.joystick.y = height - 150;
-        this.config.boost.x = width - 120;
-        this.config.boost.y = height - 150;
-
-        // Update joystick elements
-        const joystickElements = ['joystickZone', 'joystickGlow', 'joystickBase', 'joystickStick'];
+        
+        // Update joystick position
+        const joystickCfg = this.config.joystick;
+        joystickCfg.y = height - 150;
+        
+        const joystickElements = [
+            'joystickZone',
+            'joystickGlow',
+            'joystickBase',
+            'joystickStick',
+            'moveText'
+        ];
+        
         joystickElements.forEach(key => {
             const element = this.elements.get(key);
             if (element) {
-                element.setPosition(this.config.joystick.x, this.config.joystick.y);
+                element.setPosition(joystickCfg.x, joystickCfg.y);
             }
         });
-
-        // Update boost elements
-        const boostElements = ['boostZone', 'boostGlow', 'boostButton', 'boostText'];
+        
+        // Update arrow positions
+        const arrows = {
+            upArrow: { x: 0, y: -60 },
+            downArrow: { x: 0, y: 60 },
+            leftArrow: { x: -60, y: 0 },
+            rightArrow: { x: 60, y: 0 }
+        };
+        
+        Object.entries(arrows).forEach(([key, offset]) => {
+            const arrow = this.elements.get(key);
+            if (arrow) {
+                arrow.setPosition(joystickCfg.x + offset.x, joystickCfg.y + offset.y);
+            }
+        });
+        
+        // Update boost button position
+        const boostCfg = this.config.boost;
+        boostCfg.x = width - 120;
+        boostCfg.y = height - 150;
+        
+        const boostElements = [
+            'boostZone',
+            'boostGlow',
+            'boostButton',
+            'boostText'
+        ];
+        
         boostElements.forEach(key => {
             const element = this.elements.get(key);
             if (element) {
-                element.setPosition(this.config.boost.x, this.config.boost.y);
+                element.setPosition(boostCfg.x, boostCfg.y);
             }
         });
-
-        // Update text positions
-        this.elements.get('moveText')?.setPosition(
-            this.config.joystick.x,
-            this.config.joystick.y - 120
-        );
-
-        // Update arrow positions
-        const arrowOffsets = {
-            up: { x: 0, y: -60 },
-            down: { x: 0, y: 60 },
-            left: { x: -60, y: 0 },
-            right: { x: 60, y: 0 }
-        };
-
-        Object.entries(arrowOffsets).forEach(([direction, offset]) => {
-            const arrow = this.elements.get(`${direction}Arrow`);
-            if (arrow) {
-                arrow.setPosition(
-                    this.config.joystick.x + offset.x,
-                    this.config.joystick.y + offset.y
-                );
+        
+        // Update flashlight button position
+        const flashlightCfg = this.config.flashlight;
+        flashlightCfg.x = width - 120;
+        flashlightCfg.y = height - 300; // Position above boost button
+        
+        const flashlightElements = [
+            'flashlightZone',
+            'flashlightGlow',
+            'flashlightButton',
+            'flashlightIcon'
+        ];
+        
+        flashlightElements.forEach(key => {
+            const element = this.elements.get(key);
+            if (element) {
+                element.setPosition(flashlightCfg.x, flashlightCfg.y);
             }
         });
+        
+        // Position flashlight text slightly below the button
+        const flashlightText = this.elements.get('flashlightText');
+        if (flashlightText) {
+            flashlightText.setPosition(flashlightCfg.x, flashlightCfg.y + 30);
+        }
     }
 
     /**
      * Set visibility of all touch control elements
+     * @param {boolean} visible - Whether elements should be visible
      */
     setVisible(visible) {
         this.enabled = visible;
-        
-        // Store current alpha values before changing visibility
-        const defaultAlphas = {
+
+        // Set visibility for all elements
+        const alphaMap = {
             joystickZone: 0.1,
-            boostZone: 0.1,
             joystickGlow: 0.1,
-            boostGlow: 0.1,
             joystickBase: 1,
             joystickStick: 1,
+            boostZone: 0.1,
+            boostGlow: 0.1,
             boostButton: 1,
             moveText: 1,
-            boostText: 1
+            boostText: 1,
+            flashlightZone: 0.1,
+            flashlightGlow: 0.1,
+            flashlightButton: 1,
+            flashlightIcon: 1,
+            flashlightText: 1
         };
 
-        for (const [key, element] of this.elements.entries()) {
+        // Basic visibility (arrows)
+        const arrowKeys = ['upArrow', 'downArrow', 'leftArrow', 'rightArrow'];
+        arrowKeys.forEach(key => {
+            const element = this.elements.get(key);
             if (element) {
-                // Set visibility
                 element.setVisible(visible);
-                
-                // Set alpha based on visibility
-                if (!visible) {
-                    element.setAlpha(0);
-                } else {
-                    // Set default alpha based on element type
-                    if (key.includes('Zone')) {
-                        element.setAlpha(defaultAlphas.joystickZone);
-                    } else if (key.includes('Glow')) {
-                        element.setAlpha(defaultAlphas.joystickGlow);
-                    } else if (key === 'joystickBase' || key === 'joystickStick' || key === 'boostButton') {
+                if (visible) {
+                    element.setAlpha(0.5);
+                }
+            }
+        });
+
+        // Alpha-based visibility (all other elements)
+        Object.entries(alphaMap).forEach(([key, alpha]) => {
+            const element = this.elements.get(key);
+            if (element) {
+                element.setVisible(visible);
+                if (visible) {
+                    // Set appropriate alpha values
+                    if (key === 'joystickGlow' || key === 'boostGlow' || key === 'flashlightGlow') {
+                        element.setAlpha(0.1);
+                    } else if (key === 'joystickZone' || key === 'boostZone' || key === 'flashlightZone') {
+                        element.setAlpha(0.1);
+                    } else if (key === 'joystickBase' || key === 'joystickStick' || key === 'boostButton' || key === 'flashlightButton') {
                         element.setAlpha(1);
-                        element.setStrokeStyle(4, key.includes('boost') ? this.config.boost.color : this.config.joystick.color, 0.8);
-                    } else if (key.includes('Arrow')) {
-                        element.setAlpha(0.5);
+                        // Set appropriate stroke style based on button type
+                        const color = key.includes('boost') ? this.config.boost.color : 
+                                     key.includes('flashlight') ? this.config.flashlight.color : 
+                                     this.config.joystick.color;
+                        element.setStrokeStyle(4, color, 0.8);
                     } else {
-                        element.setAlpha(1);
+                        element.setAlpha(alpha);
                     }
                 }
             }
-        }
+        });
 
         // Reset state when hiding controls
         if (!visible) {
@@ -454,18 +592,36 @@ export default class TouchControlSystem {
     }
 
     /**
-     * Clean up resources
+     * Clean up all touch control elements
      */
     destroy() {
-        // Remove event listeners
+        // Remove resize listener
         this.scene.scale.off('resize', this.handleResize, this);
-
-        // Destroy all elements
-        for (const element of this.elements.values()) {
-            if (element?.destroy) {
+        
+        // Remove event listeners and destroy elements
+        const elements = Array.from(this.elements.entries());
+        
+        for (const [key, element] of elements) {
+            if (key === 'joystickZone') {
+                element.off('pointerdown');
+                element.off('pointermove');
+                element.off('pointerup');
+                element.off('pointerout');
+            } else if (key === 'boostZone') {
+                element.off('pointerdown');
+                element.off('pointerup');
+                element.off('pointerout');
+            } else if (key === 'flashlightZone') {
+                element.off('pointerdown');
+                element.off('pointerup');
+            }
+            
+            if (element.destroy) {
                 element.destroy();
             }
         }
+        
+        // Clear all references
         this.elements.clear();
     }
 } 

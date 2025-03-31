@@ -193,4 +193,41 @@ export default class AnimationSystem {
         this.createPlaceholderAnimation();
         return true;
     }
+
+    // Add a method to create the new armless swim animation
+    createPlayerNewSwimAnimation(options = {}) {
+        console.log('Creating new player swim animation');
+        
+        if (!this.scene.textures.exists('diver_swim_new')) {
+            console.error('diver_swim_new texture not found');
+            return false;
+        }
+        
+        const animKey = 'swim';
+        
+        // Remove any existing animation with this key
+        if (this.scene.anims.exists(animKey)) {
+            this.scene.anims.remove(animKey);
+            console.log(`Removed existing ${animKey} animation`);
+        }
+        
+        try {
+            // Create the animation with the new spritesheet
+            this.scene.anims.create({
+                key: animKey,
+                frames: this.scene.anims.generateFrameNumbers('diver_swim_new', { 
+                    start: 0, 
+                    end: 7  // 8 frames total (0-7)
+                }),
+                frameRate: options.frameRate || 10,
+                repeat: -1
+            });
+            
+            console.log(`Created ${animKey} animation successfully with 8 frames`);
+            return true;
+        } catch (error) {
+            console.error('Error creating animation:', error);
+            return false;
+        }
+    }
 } 

@@ -172,20 +172,24 @@ export default class Player extends Phaser.GameObjects.Container {
             return;
         }
         
+        // Safety check - if oxygen is zero but player isn't dead, trigger death
+        if (this.oxygen <= 0 && !this.isDead) {
+            console.log("⚠️ Safety check - Player has zero oxygen but isn't dead, triggering death now");
+            this.die();
+            return;
+        }
+        
         try {
             const input = this.getInputState();
             this._inputState = input;
             
-            // Explicitly update sprite orientation based on input
-            if (input.left) {
-                this.sprite.flipX = true;
-            } else if (input.right) {
-                this.sprite.flipX = false;
-            }
-            
             this.updateBoost(delta);
             this.processMovement(input);
             this.updateOxygen(delta);
+            
+            // Update particle effects at the end of the frame too
+            // to catch any velocity-based effects or changes made by physics
+            this.updateParticleEffects();
             
             this.lastPosition = { x: this.sprite.x, y: this.sprite.y };
         } catch (error) {
@@ -254,24 +258,28 @@ export default class Player extends Phaser.GameObjects.Container {
             return;
         }
         
-        // Reset acceleration each frame
-        this.sprite.setAcceleration(0, 0);
-        
         // Store current movement direction
         let currentDirection = { x: 0, y: 0 };
+        let keyPressed = false; // Track if any movement key was pressed this frame
+        
+        // Reset acceleration each frame
+        this.sprite.setAcceleration(0, 0);
         
         // Get base acceleration value from constants
         const baseAcceleration = PLAYER.ACCELERATION;
         
+        // Check if we had any direction last frame
+        const hadDirection = this.lastDirection && (this.lastDirection.x !== 0 || this.lastDirection.y !== 0);
+        
         // Apply horizontal movement
         if (input.left) {
             this.sprite.setAccelerationX(-baseAcceleration);
-            this.sprite.setFlipX(true);
             currentDirection.x = -1;
+            keyPressed = true;
         } else if (input.right) {
             this.sprite.setAccelerationX(baseAcceleration);
-            this.sprite.setFlipX(false);
             currentDirection.x = 1;
+            keyPressed = true;
         }
         
         // Update tread stamina and get current effectiveness
@@ -314,6 +322,7 @@ export default class Player extends Phaser.GameObjects.Container {
             // Apply the stamina-adjusted tread force
             this.sprite.setAccelerationY(PLAYER.GRAVITY * gravityScale - effectiveTreadForce);
             currentDirection.y = -1;
+            keyPressed = true;
             
             if (isFalling) {
                 this.sprite.body.velocity.y *= PLAYER.TREAD_WATER.VELOCITY_DAMPEN;
@@ -324,9 +333,64 @@ export default class Player extends Phaser.GameObjects.Container {
             }
             
             this.sprite.body.setDragY(PLAYER.DRAG * PLAYER.TREAD_WATER.DRAG_MULTIPLIER);
+        } else if (input.down) {
+            // Fast fall approach using constants for easier tuning
+            
+            // Apply gravity multiplier from constants
+            this.sprite.setAccelerationY(PLAYER.GRAVITY * PLAYER.FAST_FALL.GRAVITY_MULT);
+            
+            // Direct position update from constants
+            this.sprite.y += PLAYER.FAST_FALL.POSITION_STEP;
+            
+            // Set velocity from constants
+            this.sprite.body.velocity.y = PLAYER.FAST_FALL.SPEED;
+            
+            // Set drag from constants
+            this.sprite.body.setDragY(PLAYER.FAST_FALL.DRAG);
+            
+            // DEBUG: Log values to console when S is first pressed
+            if (!this._wasFastFalling) {
+                this._wasFastFalling = true;
+                console.log('FAST FALL ACTIVE:', {
+                    gravity: PLAYER.GRAVITY * PLAYER.FAST_FALL.GRAVITY_MULT,
+                    speed: PLAYER.FAST_FALL.SPEED,
+                    posStep: PLAYER.FAST_FALL.POSITION_STEP,
+                    drag: PLAYER.FAST_FALL.DRAG
+                });
+            }
+            
+            currentDirection.y = 1;
+            keyPressed = true;
         } else {
+            // Reset fast falling flag when S is released
+            if (this._wasFastFalling) {
+                this._wasFastFalling = false;
+                console.log('Fast fall deactivated');
+            }
+            
+            // Reset player's vertical scale when not fast-falling
+            if (this.sprite.scaleY !== 1) {
+                this.sprite.scaleY = 1;
+            }
+            
             // When not treading or when stamina is depleted, use base drag
             this.sprite.body.setDragY(PLAYER.DRAG);
+        }
+        
+        // Detect key press or release to trigger bubble effects instantly
+        const startedMoving = keyPressed && !hadDirection;
+        const changedDirection = 
+            currentDirection.x !== (this.lastDirection?.x || 0) || 
+            currentDirection.y !== (this.lastDirection?.y || 0);
+        const stoppedMoving = !keyPressed && hadDirection;
+        
+        // Trigger particle effects on ANY movement change 
+        if (startedMoving || changedDirection || stoppedMoving) {
+            // Store new direction immediately
+            this.lastDirection = { ...currentDirection };
+            
+            // Update particle effects instantly when input changes
+            this.updateParticleEffects();
         }
         
         // Handle boost (triggered by spacebar)
@@ -359,7 +423,17 @@ export default class Player extends Phaser.GameObjects.Container {
             const now = Date.now();
             if (!this._lastBoostParticleTime || (now - this._lastBoostParticleTime > PLAYER.BOOST.BURST_INTERVAL)) {
                 this._lastBoostParticleTime = now;
-                this.emitBoostBurst(true);
+                if (this.scene.particleSystem && this.sprite) {
+                    console.log("Emitting boost particles");
+                    this.scene.particleSystem.emitBoostBurst(
+                        this.sprite, 
+                        'bubble', 
+                        boostDirection, 
+                        true
+                    );
+                } else {
+                    console.warn("Cannot emit boost particles - particleSystem or sprite not available");
+                }
             }
         } else {
             // When not boosting
@@ -377,23 +451,8 @@ export default class Player extends Phaser.GameObjects.Container {
         // Track if player is moving this frame
         const isMovingNow = currentDirection.x !== 0 || currentDirection.y !== 0;
         
-        // Check for direction change
-        const directionChanged = 
-            currentDirection.x !== (this.lastDirection?.x || 0) || 
-            currentDirection.y !== (this.lastDirection?.y || 0);
-            
-        // Create movement burst on direction change or start of movement
-        if (isMovingNow && (!this.isMoving || directionChanged) && 
-            (!this._lastMovementBurstTime || (Date.now() - this._lastMovementBurstTime > 500)) && 
-            !this.boostActive) {
-            
-            this.scene.events.emit('movementBurst', this.sprite, currentDirection);
-            this._lastMovementBurstTime = Date.now();
-        }
-        
         // Update movement state
         this.isMoving = isMovingNow;
-        this.lastDirection = { ...currentDirection };
     }
     
     /**
@@ -440,34 +499,39 @@ export default class Player extends Phaser.GameObjects.Container {
     updateParticleEffects() {
         if (!this.sprite || !this.scene.particleSystem) return;
         
-        this.scene.particleSystem.updateBubbleTrailDirection(
-            this.sprite, 
-            this.sprite.body.velocity
-        );
+        // Track actual velocity vector for more precise directional changes
+        const velocity = {
+            x: this.sprite.body.velocity.x,
+            y: this.sprite.body.velocity.y
+        };
         
-        const speed = Math.sqrt(
-            this.sprite.body.velocity.x * this.sprite.body.velocity.x + 
-            this.sprite.body.velocity.y * this.sprite.body.velocity.y
-        );
+        // For input-based direction changes, we want to force immediate bubble emission
+        // even if velocity hasn't changed much yet. This creates more responsive feedback.
         
-        const prevSpeed = this.lastPosition ? Math.sqrt(
-            Math.pow(this.sprite.x - this.lastPosition.x, 2) + 
-            Math.pow(this.sprite.y - this.lastPosition.y, 2)
-        ) : 0;
-        
-        if (speed > 150 && prevSpeed < 50 && this.scene.particleSystem) {
-            const direction = {
-                x: this.sprite.body.velocity.x,
-                y: this.sprite.body.velocity.y
+        // If lastDirection exists, use it to override velocity for more immediate feedback
+        if (this.lastDirection && (this.lastDirection.x !== 0 || this.lastDirection.y !== 0)) {
+            // Use higher velocity magnitude to ensure bubble emission triggers
+            const inputDirectionVelocity = {
+                x: this.lastDirection.x * 100, // Significant velocity to trigger burst
+                y: this.lastDirection.y * 100  // immediately with input changes
             };
             
-            const dirLength = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
-            if (dirLength > 0) {
-                direction.x /= dirLength;
-                direction.y /= dirLength;
+            // Always update the bubble trail direction system with input-based velocity
+            // This creates an immediate response to input changes
+            if (this.scene.particleSystem.updateBubbleTrailDirection) {
+                this.scene.particleSystem.updateBubbleTrailDirection(
+                    this.sprite, 
+                    inputDirectionVelocity
+                );
             }
-            
-            this.scene.particleSystem.emitMovementBurst(this.sprite, 'bubble', direction);
+        } else {
+            // Use actual velocity if no input direction is active
+            if (this.scene.particleSystem.updateBubbleTrailDirection) {
+                this.scene.particleSystem.updateBubbleTrailDirection(
+                    this.sprite, 
+                    velocity
+                );
+            }
         }
     }
 
@@ -515,7 +579,7 @@ export default class Player extends Phaser.GameObjects.Container {
      */
     updateOxygen(delta) {
         // Skip if player is dead
-        if (!this.active) return;
+        if (!this.active || this.isDead) return;
         
         const oldOxygen = this.oxygen;
         
@@ -523,7 +587,9 @@ export default class Player extends Phaser.GameObjects.Container {
             // Refill oxygen when in an air pocket - instant refill like in original game
             this.oxygen = this.maxOxygen;
         } else if (this.boostActive) {
-            // Oxygen depletion is handled in updateBoost when boost is active
+            // Oxygen depletion is handled in processMovement when boost is active
+            // Ensure we're still depleting oxygen here as a fallback
+            this.oxygen -= (delta / 1000) * OXYGEN.DRAIN_RATE_BOOST;
         } else {
             // Normal oxygen depletion
             this.oxygen -= (delta / 1000) * OXYGEN.DRAIN_RATE;
@@ -544,11 +610,22 @@ export default class Player extends Phaser.GameObjects.Container {
             }
             
             // Handle oxygen depletion
-            if (this.oxygen <= 0 && !this.oxygenDepleted) {
-                this.oxygenDepleted = true;
-                this.scene.events.emit('playerOxygenDepleted');
+            if (this.oxygen <= 0) {
+                if (!this.oxygenDepleted) {
+                    this.oxygenDepleted = true;
+                    console.log("⚠️ Player out of oxygen - triggering death");
+                    this.scene.events.emit('playerOxygenDepleted');
+                    
+                    // Call die directly - don't rely on event handling
+                    this.die();
+                }
             } else if (this.oxygen > 0 && this.oxygenDepleted) {
-                this.oxygenDepleted = false;
+                // Only reset the oxygenDepleted flag if oxygen is significantly above zero
+                // This prevents edge cases where oxygen hovers near zero
+                if (this.oxygen > this.maxOxygen * 0.05) {
+                    console.log("🔄 Oxygen restored to safe level, resetting depleted flag");
+                    this.oxygenDepleted = false;
+                }
             }
         }
     }
@@ -558,7 +635,7 @@ export default class Player extends Phaser.GameObjects.Container {
      * @returns {boolean} True if player can boost
      */
     canBoost() {
-        if (this.boostActive || this.boostCooldown) {
+        if (this.boostActive || this.boostCooldown || this.isDead) {
             return false;
         }
         
@@ -571,7 +648,7 @@ export default class Player extends Phaser.GameObjects.Container {
      * @param {number} amount - Amount of oxygen to add
      */
     addOxygen(amount) {
-        if (amount <= 0) return;
+        if (amount <= 0 || this.isDead) return;
         
         this.oxygen = Math.min(this.maxOxygen, this.oxygen + amount);
         this.oxygenDepleted = false;
@@ -597,12 +674,15 @@ export default class Player extends Phaser.GameObjects.Container {
      * @param {number} delta - Time since last update
      */
     updateHealth(delta) {
+        if (this.isDead || !this.active) return;
+        
         if (!this.isDrowning && this.health < PLAYER.HEALTH.MAX) {
             this.health += (delta / 1000) * PLAYER.HEALTH.RECOVERY_RATE;
             this.health = Math.min(this.health, PLAYER.HEALTH.MAX);
         }
         
-        if (this.health <= 0 && this.active) {
+        if (this.health <= 0) {
+            console.log("⚠️ Player health depleted - triggering death");
             this.die();
         }
     }
@@ -612,7 +692,7 @@ export default class Player extends Phaser.GameObjects.Container {
      * @param {number} amount - Amount of damage to apply
      */
     takeDamage(amount) {
-        if (!this.active) return;
+        if (!this.active || this.isDead) return;
         
         this.health -= amount;
         this.health = Math.max(0, this.health);
@@ -623,7 +703,8 @@ export default class Player extends Phaser.GameObjects.Container {
         
         this.scene.events.emit('healthChange', this.health, PLAYER.HEALTH.MAX);
         
-        if (this.health <= 0 && !this.isDead) {
+        if (this.health <= 0) {
+            console.log("⚠️ Player taking fatal damage - triggering death");
             this.die();
         }
     }
@@ -632,15 +713,53 @@ export default class Player extends Phaser.GameObjects.Container {
      * Handle player death
      */
     die() {
-        this.active = false;
-        
-        if (this.sprite) {
-            this.sprite.setTint(0xff0000);
-            this.sprite.setAlpha(0.7);
+        if (!this.active || this.isDead) {
+            console.log("Ignoring duplicate die() call - player already dead");
+            return; // Prevent multiple deaths
         }
         
+        console.log("⚠️ Player died - triggering game over");
+        this.active = false;
+        this.isDead = true; // Set isDead flag to prevent repeated death calls
+        
+        if (this.sprite) {
+            // Stop any movement
+            if (this.sprite.body) {
+                this.sprite.body.setVelocity(0, 0);
+                this.sprite.body.setAcceleration(0, 0);
+            }
+            
+            // Visual effect
+            this.sprite.setTint(0xff0000);
+            this.sprite.setAlpha(0.7);
+            
+            // Add a death animation
+            this.scene.tweens.add({
+                targets: this.sprite,
+                alpha: 0,
+                y: this.sprite.y + 50,
+                duration: 1000,
+                ease: 'Power2',
+                onComplete: () => {
+                    if (this.sprite) {
+                        this.sprite.setVisible(false);
+                    }
+                }
+            });
+        }
+        
+        // Emit playerDeath event to trigger game over - try both approaches
+        this.scene.events.emit('playerDeath');
+        
+        // Legacy support
         if (this.scene.playerDied) {
             this.scene.playerDied();
+        }
+        
+        // Direct call to game state manager as a fallback
+        if (this.scene.gameStateManager) {
+            console.log("Directly calling game state manager");
+            this.scene.gameStateManager.changeState(this.scene.gameStateManager.gameStates.GAME_OVER);
         }
     }
     

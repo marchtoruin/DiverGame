@@ -77,8 +77,13 @@ export default class BatteryMeter {
      * Toggle flashlight state on F key press
      */
     toggleFlashlight() {
+        // Toggle flashlight state
         this.isFlashlightActive = !this.isFlashlightActive;
         console.log('BatteryMeter: Flashlight toggled:', this.isFlashlightActive);
+        // Sync with BatterySystem
+        if (this.scene.batterySystem) {
+            this.scene.batterySystem.isFlashlightOn = this.isFlashlightActive;
+        }
     }
     
     /**
@@ -105,13 +110,44 @@ export default class BatteryMeter {
             // If battery is depleted, emit event
             if (this.currentBatteryLevel === 0) {
                 console.log('BatteryMeter: Battery depleted!');
-                this.scene.events.emit('batteryDepleted');
+                
+                // First update our local state
                 this.isFlashlightActive = false;
+                
+                // Emit both event versions for compatibility
+                this.scene.events.emit('batteryDepleted'); // No hyphen (original)
+                this.scene.events.emit('battery-depleted'); // With hyphen (standard)
+                
+                // Directly disable flashlight in lighting system if available
+                if (this.scene.lightingSystem) {
+                    console.log('BatteryMeter: Directly turning off flashlight');
+                    
+                    // Set the state to off
+                    this.scene.lightingSystem.flashlightEnabled = false;
+                    
+                    // Forcibly hide visual elements
+                    if (this.scene.lightingSystem.flashlightPointLight) {
+                        this.scene.lightingSystem.flashlightPointLight.setVisible(false);
+                    }
+                    
+                    if (this.scene.lightingSystem.flashlightGlow) {
+                        this.scene.lightingSystem.flashlightGlow.setVisible(false);
+                    }
+                    
+                    // Clear any mask
+                    if (this.scene.lightingSystem.overlay) {
+                        this.scene.lightingSystem.overlay.clearMask();
+                    }
+                }
+                
+                // Sync with BatterySystem
+                if (this.scene.batterySystem) {
+                    this.scene.batterySystem.isFlashlightOn = false;
+                }
             }
         } 
         // Handle battery recharge when flashlight is off
         else if (!this.isFlashlightActive && this.currentBatteryLevel < this.maxBatteryLevel) {
-            // Increase battery level
             this.currentBatteryLevel = Math.min(this.maxBatteryLevel, this.currentBatteryLevel + this.rechargeRate);
         }
         

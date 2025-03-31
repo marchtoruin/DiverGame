@@ -38,6 +38,10 @@ import seaweedImg from '../assets/seaweed.png'; // Add seaweed tileset
 import flashlightCone1Img from '../assets/flashlight_cone1.png'; // Import custom flashlight mask
 import new_idle_swimImg from '../assets/new_idle_swim.png'; // Import new player spritesheet
 import batteryImg from '../assets/battery.png';
+import jellyFishImg from '../assets/jelly_fish.png'; // Import jellyfish sprite with underscore
+import jellyChargeImg from '../assets/jelly_charge.png'; // Import jellyfish battery charge pickup sprite with underscore
+import armsImg from '../assets/arms.png';
+import armsLeftImg from '../assets/arms_left.png'; // Import left-facing arm sprite
 
 // Import systems
 import AnimationSystem from '../systems/AnimationSystem';
@@ -66,6 +70,7 @@ import BackgroundSystem from '../systems/BackgroundSystem';
 import LightingSystem from '../systems/LightingSystem';
 import GameStateManager from '../systems/GameStateManager';
 import BatterySystem from '../systems/BatterySystem';
+import JellyfishSystem from '../systems/JellyfishSystem';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -101,6 +106,7 @@ export default class GameScene extends Phaser.Scene {
         this.gameSceneCamera = null;
         this.backgroundSystem = null;
         this.lightingSystem = null;
+        this.jellyfishSystem = null;
         
         // Game state
         this.oxygenLevel = 100;
@@ -163,13 +169,32 @@ export default class GameScene extends Phaser.Scene {
             // CRITICAL: Make sure the spritesheet loads BEFORE it's needed
             // Load with all possible options to avoid frame/dimensions issues
             console.log('Loading player spritesheet upfront with forced options');
+            
+            // Add texture-specific loading event listener to create animations only after textures are loaded
+            this.load.on('filecomplete-spritesheet-diver_swim_new', function() {
+                console.log('✅ diver_swim_new spritesheet loaded successfully!');
+                const texture = this.textures.get('diver_swim_new');
+                console.log('Texture details on load:', 
+                    'frameTotal:', texture.frameTotal,
+                    'dimensions:', texture.source[0].width, 'x', texture.source[0].height);
+                
+                // Store a flag to indicate the spritesheet is ready
+                this.diverSpritesheetLoaded = true;
+            }, this);
+            
+            this.load.on('filecomplete', function(key) {
+                console.log('File loaded:', key);
+            });
+            
+            // Load the player sprite sheet with exact dimensions (1048px total width, 8 frames at 131x150)
+            console.log('Loading player sprite sheet with 131x150 frames');
             this.load.spritesheet('diver_swim_new', new_idle_swimImg, { 
-                frameWidth: 139,
-                frameHeight: 150,
-                startFrame: 0,
-                endFrame: 7,
-                spacing: 0,
-                margin: 0
+                frameWidth: 131,     // Each frame is exactly 131px wide
+                frameHeight: 150,    // Each frame is exactly 150px tall
+                startFrame: 0,       // Start at the first frame
+                endFrame: 7,         // 8 frames total (0-7)
+                spacing: 0,          // No spacing between frames
+                margin: 0            // No margin around frames
             });
             
             this.load.image('bubble', bubbleImg);
@@ -177,6 +202,10 @@ export default class GameScene extends Phaser.Scene {
             
             // Load enemy assets
             this.load.image('badFish', badFishImg);
+            
+            // Load jellyfish and charge pickup
+            this.load.image('jelly_fish', jellyFishImg);
+            this.load.image('jelly_charge', jellyChargeImg);
             
             // Load all background bubble variations
             this.load.image('bg_bubble1', bgBubble1Img);
@@ -189,6 +218,21 @@ export default class GameScene extends Phaser.Scene {
             // Load custom flashlight mask image
             this.load.image('flashlight_cone1', flashlightCone1Img);
             
+            // Load arms sprite for the diver
+            this.load.image('arms', armsImg);
+            this.load.image('arms_left', armsLeftImg);
+            this.load.on('filecomplete-image-arms', () => {
+                console.log('[DEBUG] arms.png loaded');
+                this.findArmPivotPoint();
+            });
+            this.load.on('filecomplete-image-arms_left', () => {
+                console.log('[DEBUG] arms_left.png loaded successfully!');
+                if (this.armPivot && !this.armPivotLeft) {
+                    // If the right arm pivot is already found but not the left one
+                    this.findPivotInTexture('arms_left', 'armPivotLeft');
+                }
+            });
+            
             // Load audio
             this.load.audio('music', bgMusic);
             this.load.audio('ambience', ambienceMusic);
@@ -200,6 +244,122 @@ export default class GameScene extends Phaser.Scene {
                 });
         } catch (error) {
             console.error('Error in preload:', error);
+        }
+    }
+
+    /**
+     * Finds the magenta pivot point marker (#fb00ff) in the arms sprite
+     * and stores the normalized origin coordinates
+     */
+    findArmPivotPoint() {
+        try {
+            if (!this.textures.exists('arms')) {
+                console.error('[ARM PIVOT] Arms texture not available yet');
+                return;
+            }
+
+            console.log('[ARM PIVOT] Scanning arms texture for magenta pivot marker...');
+            this.findPivotInTexture('arms');
+            
+            // Also scan the left-facing arm if it exists
+            if (this.textures.exists('arms_left')) {
+                console.log('[ARM PIVOT] Scanning arms_left texture for magenta pivot marker...');
+                this.findPivotInTexture('arms_left', 'armPivotLeft');
+            }
+        } catch (error) {
+            console.error('[ARM PIVOT] Error analyzing arms texture:', error);
+            // Default fallback values
+            this.armPivot = { x: 0.0, y: 0.5, pixelX: 0, pixelY: 0 };
+            this.armPivotLeft = { x: 1.0, y: 0.5, pixelX: 0, pixelY: 0 };
+        }
+    }
+    
+    /**
+     * Scans a texture for the magenta pivot marker and stores the normalized coordinates
+     * @param {string} textureKey - The key of the texture to scan
+     * @param {string} storageProperty - The property name to store the result (defaults to 'armPivot')
+     */
+    findPivotInTexture(textureKey, storageProperty = 'armPivot') {
+        try {
+            // Get the texture
+            const texture = this.textures.get(textureKey);
+            const frame = texture.getFrameNames()[0] || '__BASE';
+            
+            // Create a temporary canvas to get pixel data
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Get image dimensions
+            const source = texture.getSourceImage();
+            const width = source.width;
+            const height = source.height;
+            
+            // Set canvas size
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Draw the image onto canvas
+            ctx.drawImage(source, 0, 0);
+            
+            // Get image data - all pixels
+            const imageData = ctx.getImageData(0, 0, width, height).data;
+            
+            // Target color - magenta #fb00ff (251, 0, 255)
+            const targetR = 251;
+            const targetG = 0;
+            const targetB = 255;
+            
+            // Look for the magenta pixel
+            let pivotX = -1;
+            let pivotY = -1;
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const index = (y * width + x) * 4;
+                    const r = imageData[index];
+                    const g = imageData[index + 1];
+                    const b = imageData[index + 2];
+                    
+                    // Check if this pixel matches the magenta color
+                    if (r === targetR && g === targetG && b === targetB) {
+                        pivotX = x;
+                        pivotY = y;
+                        console.log(`[ARM PIVOT] Found magenta marker in ${textureKey} at pixel (${x}, ${y})`);
+                        // Break out of both loops once found
+                        y = height;
+                        break;
+                    }
+                }
+            }
+            
+            if (pivotX >= 0 && pivotY >= 0) {
+                // Calculate normalized origin values
+                const originX = pivotX / width;
+                const originY = pivotY / height;
+                
+                // Store these values for use when creating the diverArm sprite
+                this[storageProperty] = { x: originX, y: originY, pixelX: pivotX, pixelY: pivotY };
+                
+                console.log(`[ARM PIVOT] Calculated normalized origin for ${textureKey}: (${originX.toFixed(3)}, ${originY.toFixed(3)})`);
+            } else {
+                console.warn(`[ARM PIVOT] No magenta pivot marker found in ${textureKey} texture`);
+                // Default fallback values
+                if (textureKey === 'arms') {
+                    this[storageProperty] = { x: 0.0, y: 0.5, pixelX: 0, pixelY: height / 2 };
+                } else {
+                    // For arms_left, default to right edge center
+                    this[storageProperty] = { x: 1.0, y: 0.5, pixelX: width, pixelY: height / 2 };
+                }
+            }
+        } catch (error) {
+            console.error(`[ARM PIVOT] Error analyzing ${textureKey} texture:`, error);
+            // Default fallback values
+            if (textureKey === 'arms') {
+                this[storageProperty] = { x: 0.0, y: 0.5, pixelX: 0, pixelY: 0 };
+            } else {
+                // For arms_left, default to right edge center
+                this[storageProperty] = { x: 1.0, y: 0.5, pixelX: 0, pixelY: 0 };
+            }
         }
     }
 
@@ -255,18 +415,33 @@ export default class GameScene extends Phaser.Scene {
             
             // Handle game over conditions
             this.events.on('playerOxygenDepleted', () => {
+                console.log("💀 GameScene received playerOxygenDepleted event - game over");
                 if (this.gameStateManager) {
-                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER);
+                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER, {
+                        cause: 'oxygen'
+                    });
+                } else {
+                    console.error("Failed to trigger game over - gameStateManager not initialized");
+                    // Emergency fallback - restart the scene if game state manager is not available
+                    this.scene.restart();
                 }
             });
             
             this.events.on('playerDeath', () => {
+                console.log("💀 GameScene received playerDeath event - game over");
                 if (this.gameStateManager) {
-                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER);
+                    this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER, {
+                        cause: 'health'
+                    });
+                } else {
+                    console.error("Failed to trigger game over - gameStateManager not initialized");
+                    // Emergency fallback - restart the scene if game state manager is not available
+                    this.scene.restart();
                 }
             });
             
             this.events.on('gameOver', () => {
+                console.log("💀 GameScene received gameOver event");
                 if (this.gameStateManager) {
                     this.gameStateManager.changeState(this.gameStateManager.gameStates.GAME_OVER);
                 }
@@ -284,6 +459,25 @@ export default class GameScene extends Phaser.Scene {
                 if (this.lightingSystem) {
                     // Toggle flashlight with the custom mask
                     this.lightingSystem.toggleFlashlight('flashlight_cone1');
+                }
+            });
+            
+            // Add custom flashlight mask generator (press G key)
+            this.input.keyboard.on('keydown-G', () => {
+                if (this.lightingSystem) {
+                    console.log('Creating custom flashlight mask template...');
+                    const maskKey = this.lightingSystem.createCustomFlashlightMaskTemplate();
+                    
+                    if (maskKey) {
+                        // Apply the new custom mask
+                        this.lightingSystem.setCustomFlashlightMask(maskKey);
+                        console.log('Custom flashlight mask applied! Toggle with F key to see it.');
+                        
+                        // If flashlight is off, turn it on to show the new mask
+                        if (!this.lightingSystem.flashlightEnabled) {
+                            this.lightingSystem.toggleFlashlight();
+                        }
+                    }
                 }
             });
             
@@ -324,9 +518,32 @@ export default class GameScene extends Phaser.Scene {
             this.batterySystem = new BatterySystem(this);
             this.batterySystem.scene.events.on('battery-depleted', () => {
                 console.log("💡 GameScene caught battery-depleted");
-                if (this.lightingSystem?.flashlightEnabled) {
-                    console.log("💡 GameScene toggling flashlight OFF");
-                    this.lightingSystem.toggleFlashlight('flashlight_cone1');
+                if (this.lightingSystem) {
+                    console.log("💡 GameScene turning flashlight OFF");
+                    
+                    // Directly set flashlight to disabled state instead of toggling
+                    this.lightingSystem.flashlightEnabled = false;
+                    
+                    // Force hide flashlight visual elements
+                    if (this.lightingSystem.flashlightPointLight) {
+                        this.lightingSystem.flashlightPointLight.setVisible(false);
+                    }
+                    
+                    if (this.lightingSystem.flashlightGlow) {
+                        this.lightingSystem.flashlightGlow.setVisible(false);
+                    }
+                    
+                    // Clear any mask on the overlay
+                    if (this.lightingSystem.overlay) {
+                        this.lightingSystem.overlay.clearMask();
+                    }
+                    
+                    console.log("💡 GameScene: Flashlight elements forcibly hidden");
+                }
+                
+                // Also update the battery system state
+                if (this.batterySystem) {
+                    this.batterySystem.isFlashlightOn = false;
                 }
             });
             
@@ -338,6 +555,11 @@ export default class GameScene extends Phaser.Scene {
             console.log('Creating enemy system...');
             this.enemySystem = new EnemySystem(this);
             console.log('Enemy system created successfully');
+            
+            // Initialize jellyfish system
+            console.log('Creating jellyfish system...');
+            this.jellyfishSystem = new JellyfishSystem(this);
+            console.log('Jellyfish system created successfully');
             
             // Initialize lighting system
             this.lightingSystem = new LightingSystem(this);
@@ -783,51 +1005,56 @@ export default class GameScene extends Phaser.Scene {
                         // Set fallback texture
                         this.player.sprite.setTexture('player');
                     } else {
-                        // Set the texture first
+                        // Step 1: Set the texture
                         this.player.sprite.setTexture('diver_swim_new');
                         console.log('Player texture set to diver_swim_new');
                         
-                        // Create animation config directly
-                        const animConfig = {
-                            key: 'idle_swim',
-                            frames: this.anims.generateFrameNumbers('diver_swim_new', { 
-                                start: 0, 
-                                end: 7 
-                            }),
-                            frameRate: 8, // Reduced from 10 for smoother animation
-                            repeat: -1,
-                            // Enable interpolation between frames for ultra-smooth animation
-                            yoyo: false, 
-                            delay: 0,
-                            // Add Phaser's built-in easing for smoother transitions
-                            ease: 'Sine.easeInOut',
-                            // Use higher frame blending value for smooth interpolation (0 to 1)
-                            blendMode: Phaser.BlendModes.NORMAL
-                        };
+                        // Step 2: Set the origin to center (0.5, 0.5)
+                        this.player.sprite.setOrigin(0.5, 0.5);
+                        console.log('Set sprite origin to center (0.5, 0.5)');
                         
-                        // Check if animation already exists
-                        if (this.anims.exists('idle_swim')) {
-                            // Remove existing animation
-                            this.anims.remove('idle_swim');
-                            console.log('Removed existing idle_swim animation');
+                        // Step 3: Create the swim animation
+                        if (!this.anims.exists('swim')) {
+                            this.anims.create({
+                                key: 'swim',
+                                frames: this.anims.generateFrameNumbers('diver_swim_new', { 
+                                    start: 0, 
+                                    end: 7  // 8 frames total (0-7)
+                                }),
+                                frameRate: 10,
+                                repeat: -1  // Loop infinitely
+                            });
+                            console.log('Created swim animation (8 frames, 10 FPS, looping)');
                         }
                         
-                        // Create the animation
-                        this.anims.create(animConfig);
-                        console.log('Created idle_swim animation');
-                        
-                        // Adjust the physics body size to match the new sprite dimensions
-                        // but keep the same relative size for collisions
-                        this.player.sprite.body.setSize(110, 130, true);  // Slightly smaller than visual size
-                        this.player.sprite.body.setOffset(15, 10);  // Center the physics body
-                        
-                        // Play the animation
-                        this.player.sprite.anims.play('idle_swim', true);
+                        // Step 4: Play the animation
+                        this.player.sprite.anims.play('swim', true);
+                        console.log('Started swim animation');
                     }
                 } catch (error) {
                     console.error('Error setting up player animation:', error);
                     // Fallback to static image
                     this.player.sprite.setTexture('player');
+                }
+                
+                // Add the diver arm sprite if the texture exists
+                if (this.textures.exists('arms')) {
+                    this.diverArm = this.add.sprite(this.player.sprite.x, this.player.sprite.y, 'arms');
+                    
+                    // Check if we've found the pivot point, otherwise use defaults
+                    if (this.armPivot) {
+                        console.log(`[ARM PIVOT] Applying pivot origin ${this.armPivot.x.toFixed(3)}, ${this.armPivot.y.toFixed(3)}`);
+                        this.diverArm.setOrigin(this.armPivot.x, this.armPivot.y);
+                    } else {
+                        console.warn('[ARM PIVOT] No pivot data found, using default origin');
+                        this.diverArm.setOrigin(0.0, 0.5);
+                    }
+                    
+                    this.diverArm.setDepth(this.player.sprite.depth + 1);
+                    this.diverArm.setVisible(true);
+                    console.log('Added diver arm sprite');
+                } else {
+                    console.error('[ARMS DEBUG] ❌ CRITICAL: arms texture not available');
                 }
                 
                 // Explicitly create helmet bubbles
@@ -845,6 +1072,29 @@ export default class GameScene extends Phaser.Scene {
                         this.gameSceneCamera.shake(
                             CAMERA.SHAKE.DURATION,
                             CAMERA.SHAKE.INTENSITY
+                        );
+                    }
+                });
+                
+                // Listen for boost start/end events to maintain arm position
+                this.player.on('boostStart', () => {
+                    // Ensure arm stays attached when boost starts
+                    if (this.diverArm && this.player?.sprite) {
+                        const offsetX = this.player.sprite.flipX ? 3 : -3;
+                        this.diverArm.setPosition(
+                            this.player.sprite.x + offsetX,
+                            this.player.sprite.y - 47
+                        );
+                    }
+                });
+                
+                this.player.on('boostEnd', () => {
+                    // Ensure arm stays attached when boost ends
+                    if (this.diverArm && this.player?.sprite) {
+                        const offsetX = this.player.sprite.flipX ? 3 : -3;
+                        this.diverArm.setPosition(
+                            this.player.sprite.x + offsetX,
+                            this.player.sprite.y - 47
                         );
                     }
                 });
@@ -990,11 +1240,105 @@ export default class GameScene extends Phaser.Scene {
     update(time, delta) {
         if (!this.gameRunning) return;
         
-        // Enhanced animation management: ensure animation is playing with proper settings
-        if (this.player && this.player.sprite && this.anims.exists('idle_swim')) {
-            // If not playing or needs to be restarted due to frame issues
-            if (!this.player.sprite.anims.isPlaying || this.player.sprite.anims.getName() !== 'idle_swim') {
-                this.player.sprite.anims.play('idle_swim', true);
+        // ABSOLUTE MOUSE TRACKING PRIORITY
+        if (this.diverArm && this.player?.sprite) {
+            // Get mouse pointer position and player position
+            const pointer = this.input.activePointer;
+            const worldMouseX = this.cameras.main.scrollX + pointer.x;
+            const worldMouseY = this.cameras.main.scrollY + pointer.y;
+            const playerX = this.player.sprite.x;
+            const playerY = this.player.sprite.y;
+            
+            // Check if left mouse button is down (shooting)
+            const isShooting = pointer.isDown && pointer.button === 0;
+            
+            // CRITICAL: While shooting, mouse direction ALWAYS takes priority over movement
+            const isMouseOnLeft = worldMouseX < playerX;
+            
+            // Update player facing direction based ONLY on mouse position
+            // This ensures proper facing direction during shooting regardless of movement
+            this.player.sprite.flipX = isMouseOnLeft;
+            const isFacingLeft = this.player.sprite.flipX;
+            
+            // Position the arm directly at the shoulder with fixed offsets
+            const shoulderOffsetX = isFacingLeft ? 3 : -3;
+            const shoulderOffsetY = -47;
+            this.diverArm.x = playerX + shoulderOffsetX;
+            this.diverArm.y = playerY + shoulderOffsetY;
+            
+            // Update arm texture if direction changed
+            if (this.diverArm.isFacingLeft !== isFacingLeft) {
+                // Set the correct arm texture based on facing direction
+                const desiredKey = isFacingLeft ? 'arms_left' : 'arms';
+                this.diverArm.setTexture(desiredKey);
+                
+                // Reset any flip state
+                this.diverArm.setFlipX(false);
+                this.diverArm.setFlipY(false);
+                
+                // Apply the correct pivot origin
+                if (this.armPivot) {
+                    if (isFacingLeft && this.armPivotLeft) {
+                        this.diverArm.setOrigin(this.armPivotLeft.x, this.armPivotLeft.y);
+                    } else {
+                        this.diverArm.setOrigin(this.armPivot.x, this.armPivot.y);
+                    }
+                }
+                
+                // Store the new facing direction
+                this.diverArm.isFacingLeft = isFacingLeft;
+            }
+            
+            // Calculate true aim direction (used for bullet firing, etc.)
+            const rawAngle = Phaser.Math.Angle.Between(
+                this.diverArm.x, this.diverArm.y,
+                worldMouseX, worldMouseY
+            );
+            
+            // Store the raw angle for systems that need true direction
+            this.diverArm.trueDirection = rawAngle;
+            
+            // Get visual angle with clamping
+            let visualAngle = rawAngle;
+            const isAbove = worldMouseY < this.diverArm.y;
+            
+            if (isFacingLeft) {
+                // Left facing arm logic
+                let degrees = Phaser.Math.RadToDeg(rawAngle);
+                if (degrees < 0) degrees += 360;
+                
+                if (degrees < 90 || degrees > 270) {
+                    // Clamp to vertical when out of range
+                    visualAngle = Phaser.Math.DegToRad(isAbove ? 90 : 270);
+                }
+                
+                // Add PI for left-facing arm texture
+                visualAngle += Math.PI;
+            } else {
+                // Right facing arm logic
+                let degrees = Phaser.Math.RadToDeg(rawAngle);
+                
+                if (degrees < -90 || degrees > 90) {
+                    // Clamp to vertical when out of range
+                    visualAngle = Phaser.Math.DegToRad(isAbove ? -90 : 90);
+                }
+            }
+            
+            // Apply the rotation immediately
+            this.diverArm.setRotation(visualAngle);
+            this.diverArm.finalRotation = visualAngle;
+            
+            // Calculate arm tip position
+            const armLength = 70;
+            this.diverArm.tipX = this.diverArm.x + Math.cos(this.diverArm.trueDirection) * armLength;
+            this.diverArm.tipY = this.diverArm.y + Math.sin(this.diverArm.trueDirection) * armLength;
+        }
+        
+        // Simple animation check - ensure animation is playing
+        if (this.player && this.player.sprite && this.anims.exists('swim')) {
+            // If not playing, restart the animation
+            if (!this.player.sprite.anims.isPlaying) {
+                this.player.sprite.play('swim', true);
             }
         }
         
@@ -1058,51 +1402,14 @@ export default class GameScene extends Phaser.Scene {
             this.player.rotation = playerRotation;
         }
         
-        // Check if player's sprite flipX needs to be updated based on movement
-        if (this.player && this.player.sprite) {
-            // If player is moving left
-            if (this.cursors.left.isDown || this.keys.left.isDown) {
-                // If player wasn't already facing left
-                if (!this.player.sprite.flipX) {
-                    // Update the player sprite and flashlight immediately
-                    this.player.sprite.flipX = true;
-                    
-                    // Make sure animation keeps playing
-                    if (this.anims.exists('idle_swim') && !this.player.sprite.anims.isPlaying) {
-                        this.player.sprite.anims.play('idle_swim', true);
-                    }
-                    
-                    // Update flashlight rotation if enabled
-                    if (this.lightingSystem && this.lightingSystem.flashlightEnabled) {
-                        this.lightingSystem.flashlightRotation = Math.PI; // left
-                        this.lightingSystem.updateFlashlightCone();
-                    }
-                }
-            }
-            // If player is moving right
-            else if (this.cursors.right.isDown || this.keys.right.isDown) {
-                // If player wasn't already facing right
-                if (this.player.sprite.flipX) {
-                    // Update the player sprite and flashlight immediately
-                    this.player.sprite.flipX = false;
-                    
-                    // Make sure animation keeps playing
-                    if (this.anims.exists('idle_swim') && !this.player.sprite.anims.isPlaying) {
-                        this.player.sprite.anims.play('idle_swim', true);
-                    }
-                    
-                    // Update flashlight rotation if enabled
-                    if (this.lightingSystem && this.lightingSystem.flashlightEnabled) {
-                        this.lightingSystem.flashlightRotation = 0; // right
-                        this.lightingSystem.updateFlashlightCone();
-                    }
-                }
-            }
-        }
-        
         // Update the lighting system
         if (this.lightingSystem) {
             this.lightingSystem.update(delta);
+        }
+
+        // Update jellyfish system
+        if (this.jellyfishSystem) {
+            this.jellyfishSystem.update(time, delta);
         }
     }
 
@@ -1138,6 +1445,12 @@ export default class GameScene extends Phaser.Scene {
                 }
             });
             
+            // Clean up diver arm
+            if (this.diverArm) {
+                this.diverArm.destroy();
+                console.log('Cleaned up diver arm');
+            }
+            
             // Null out references
             this.tilemapSystem = null;
             this.airPocketSystem = null;
@@ -1172,6 +1485,7 @@ export default class GameScene extends Phaser.Scene {
                 { system: this.particleSystem, name: 'ParticleSystem' },
                 { system: this.enemySystem, name: 'EnemySystem' },
                 { system: this.bulletSystem, name: 'BulletSystem' },
+                { system: this.jellyfishSystem, name: 'JellyfishSystem' },
                 { system: this.audioSystem, name: 'AudioSystem' }
             ];
             

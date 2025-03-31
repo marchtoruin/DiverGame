@@ -21,7 +21,7 @@ export default class LightingSystem {
         // Current lighting state
         this.currentLightLevel = 0; // 0 = default/full brightness
         this.targetLightLevel = 0;
-        this.currentZoneType = null; // Track the current zone type the player is in
+        this.currentZoneType = 'default'; // Track the current zone type the player is in
         
         // Enhanced transition properties
         this.transitionStartTime = 0;
@@ -59,14 +59,32 @@ export default class LightingSystem {
         this.prevPlayerX = null;
         this.prevPlayerY = null;
         this.lastCheckTime = 0;
-        this.checkInterval = 100; // Check every 100ms to avoid too many checks
+        this.checkInterval = 0; // CHANGED: Set to 0 to check every frame always
+        this.highSpeedThreshold = 50; // CHANGED: Lowered to catch more high-speed movement
+        this.intermediatePointCount = 20; // INCREASED: More sampling points
+        this.lastProcessedZoneType = 'default'; // Track last processed zone for state validation
+        this.zoneExitCooldown = 10000; // INCREASED: Much longer persistence for lighting zones
+        this.lastZoneEnterTime = 0; // When we last entered a non-default zone
         
-        console.log('LightingSystem initialized with flashlight support');
+        // Important new values for tracking zones
+        this.shouldResetToDefault = false; // Added flag to control resets to default lighting
+        this.lastNonDefaultZoneType = null; // Track the last non-default zone for persistence
+        this.lastNonDefaultZoneLevel = 0; // Store the level too
+        this.persistentMode = true; // CRITICAL: Always use persistent lighting mode
+        this.inDebugMode = true; // Always log debug info for lighting zones
+        this.forceZonePersistence = true; // Don't allow resets to default
+        
+        // Debug graphics and text
+        this.debugGraphics = null;
+        this.debugText = null;
+        
+        console.log('LightingSystem initialized with PERSISTENT lighting zone handling');
         
         // Add a debug visualization method call after a delay
         // to help verify zone creation
         if (this.scene.physics.config.debug) {
             this.scene.time.delayedCall(1000, this.debugZones, [], this);
+            this.setupDebugVisuals();
         }
     }
     
@@ -561,6 +579,45 @@ export default class LightingSystem {
     }
     
     /**
+     * Handle player vertical boost transitions
+     * Called when player is detected to be vertically boosting through zones
+     * @param {string} targetZoneType - The target zone type 
+     * @param {number} targetLevel - The target light level
+     * @param {boolean} enteringDarkArea - Whether we're entering a dark area
+     * @param {number} distanceMoved - How far the player moved this frame
+     */
+    handleVerticalBoostTransition(targetZoneType, targetLevel, enteringDarkArea, distanceMoved) {
+        // Current time for tracking
+        const currentTime = this.scene.time.now;
+        
+        console.log(`VERTICAL BOOST TRANSITION: to ${targetZoneType} zone`);
+        console.log(`  Distance moved: ${distanceMoved.toFixed(2)} pixels`);
+        console.log(`  Entering dark area: ${enteringDarkArea}`);
+        
+        // Store transition start state
+        this.transitionStartTime = currentTime;
+        this.transitionStartValue = this.currentLightLevel;
+        
+        // Set target light level and zone type
+        this.targetLightLevel = targetLevel;
+        this.currentZoneType = targetZoneType;
+        this.lastProcessedZoneType = targetZoneType;
+        
+        // CRITICAL: Update the last non-default zone when we transition
+        this.lastNonDefaultZoneType = targetZoneType;
+        this.lastNonDefaultZoneLevel = targetLevel;
+        
+        // CRITICAL: Immediate transition for boosting to make sure effect is visible
+        this.transitionDuration = Math.max(100, 200 / Math.min(3, Math.max(1, distanceMoved / 100)));
+        
+        // Extended cooldown to prevent immediate reversion
+        this.lastZoneEnterTime = currentTime + 5000; // Add significant extra cooldown
+        
+        console.log(`  Fast transition: ${this.transitionDuration}ms`);
+        console.log(`  Extended cooldown until: ${(this.lastZoneEnterTime - currentTime)}ms from now`);
+    }
+
+    /**
      * Update lighting based on player position
      * @param {number} delta - Time elapsed since last update
      */
@@ -574,108 +631,248 @@ export default class LightingSystem {
         const playerX = this.player.sprite ? this.player.sprite.x : this.player.x;
         const playerY = this.player.sprite ? this.player.sprite.y : this.player.y;
 
-        let inAnyZone = false;
-        let currentZoneType = null;
-        let enteredNewZone = false;
-        let targetLevel = this.zoneLevels['default'];
-        let inBrightZone = false;
-
-        // Only check zones periodically or on significant movement
-        const currentTime = this.scene.time.now;
-        const timeSinceLastCheck = currentTime - this.lastCheckTime;
+        // Calculate distance moved since last check
         const distanceMoved = this.prevPlayerX !== null ? 
             Phaser.Math.Distance.Between(
                 this.prevPlayerX, this.prevPlayerY,
                 playerX, playerY
             ) : 0;
-
-        if (timeSinceLastCheck > this.checkInterval || distanceMoved > 30) {
-            // First, specifically check for bright zones which override all other zone types
-            for (const zone of this.lightingZones) {
-                if (zone.type === 'bright' && Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
-                    inBrightZone = true;
-                    inAnyZone = true;
-                    currentZoneType = 'bright';
-                    targetLevel = 0; // Explicit full brightness
-                    
-                    if (this.currentZoneType !== 'bright') {
-                        enteredNewZone = true;
-                        if (this.scene.physics.config.debug) {
-                            console.log('Player entered BRIGHT zone - forcing full brightness');
+        
+        // Check if movement is primarily vertical
+        const isVerticalMovement = this.prevPlayerX !== null && 
+            Math.abs(playerY - this.prevPlayerY) > Math.abs(playerX - this.prevPlayerX) * 1.2;
+            
+        // High-speed movement detection - boost or falling quickly
+        const isHighSpeedMovement = distanceMoved > this.highSpeedThreshold;
+        
+        // Special case for vertical boosting - requires even more careful handling
+        const isVerticalBoosting = isVerticalMovement && isHighSpeedMovement && 
+            Math.abs(playerY - this.prevPlayerY) > 100; // Reduced threshold to catch more vertical boosts
+            
+        // DEBUG OUTPUT: Log vertical boost detection
+        if (isVerticalBoosting && this.inDebugMode) {
+            console.log(`%c🚀 VERTICAL BOOST DETECTED - ${Math.abs(playerY - this.prevPlayerY).toFixed(0)}px`, 
+                         'background: #300; color: #f80; font-weight: bold');
+        }
+        
+        // CRITICAL CHANGE: Always check zones every frame during vertical movement
+        const shouldCheckZones = true;
+        
+        if (shouldCheckZones) {
+            // Track zones we pass through
+            const detectedZones = [];
+            
+            // When moving at high speed, check intermediate positions along the path
+            const positionsToCheck = [];
+            
+            // Always check current position first
+            positionsToCheck.push({ x: playerX, y: playerY, isCurrent: true });
+            
+            // If moving fast and we have previous position data, add several intermediate points
+            if ((isHighSpeedMovement || isVerticalMovement) && this.prevPlayerX !== null) {
+                // Add many more intermediate positions for fast movements
+                // CRITICAL IMPROVEMENT: Use many more sampling points for vertical movement
+                const pointCount = Math.min(
+                    120, // INCREASED: Much higher sample density for vertical boosts
+                    Math.max(
+                        this.intermediatePointCount,
+                        isVerticalBoosting ? Math.floor(distanceMoved / 4) : // INCREASED: Much denser sampling 
+                        isVerticalMovement ? Math.floor(distanceMoved / 10) : 
+                        Math.floor(distanceMoved / 30)
+                    )
+                );
+                
+                if (this.inDebugMode && isVerticalMovement) {
+                    console.log(`Using ${pointCount} sampling points for ${distanceMoved.toFixed(0)}px movement`);
+                }
+                
+                // Create a dense sampling grid between previous and current position
+                for (let i = 1; i <= pointCount; i++) {
+                    const ratio = i / (pointCount + 1);
+                    const intermediateX = this.prevPlayerX + (playerX - this.prevPlayerX) * ratio;
+                    const intermediateY = this.prevPlayerY + (playerY - this.prevPlayerY) * ratio;
+                    positionsToCheck.push({ x: intermediateX, y: intermediateY, ratio });
+                }
+                
+                // Sort positions from previous to current to check in order of movement
+                positionsToCheck.sort((a, b) => {
+                    if (a.isCurrent) return 1; // Current position always last
+                    if (b.isCurrent) return -1;
+                    return (a.ratio || 0) - (b.ratio || 0); // Sort by ratio otherwise
+                });
+            }
+            
+            // Check each position against all lighting zones
+            // Important: we need to check ALL zones at each position, not stop at first match
+            for (const position of positionsToCheck) {
+                let positionZones = [];
+                
+                // First pass: check for bright zones which override all other zone types
+                for (const zone of this.lightingZones) {
+                    if (zone.type === 'bright' && Phaser.Geom.Rectangle.Contains(zone.rect, position.x, position.y)) {
+                        positionZones.push({
+                            type: zone.type,
+                            level: 0, // Explicit full brightness
+                            priority: 10, // Highest priority
+                            position: { ...position }
+                        });
+                    }
+                }
+                
+                // If no bright zone found, check for other zone types
+                if (positionZones.length === 0) {
+                    // Check all zones and collect them
+                    for (const zone of this.lightingZones) {
+                        // Skip default zones
+                        if (zone.type === 'default') continue;
+                        
+                        if (Phaser.Geom.Rectangle.Contains(zone.rect, position.x, position.y)) {
+                            // Higher priority for dark zones during vertical boosting
+                            const basePriority = zone.type === 'black' ? 9 : 
+                                              zone.type === 'dark' ? 8 : 
+                                              zone.type === 'dim' ? 7 : 5;
+                            
+                            // Boost priority for darkness zones during vertical boost
+                            const priority = isVerticalBoosting && (zone.type === 'black' || zone.type === 'dark') ? 
+                                          basePriority + 2 : basePriority;
+                                           
+                            positionZones.push({
+                                type: zone.type,
+                                level: this.zoneLevels[zone.type],
+                                priority: priority,
+                                position: { ...position }
+                            });
                         }
                     }
+                }
+                
+                // If we found any zones at this position, add the highest priority one to our detected zones
+                if (positionZones.length > 0) {
+                    // Sort by priority (highest first)
+                    positionZones.sort((a, b) => b.priority - a.priority);
+                    detectedZones.push(positionZones[0]);
                     
-                    // Force immediate transition to full brightness
-                    this.transitionDuration = 500; // Quick transition for bright zones
-                    break;
+                    // Store the last non-default zone we found
+                    this.lastNonDefaultZoneType = positionZones[0].type;
+                    this.lastNonDefaultZoneLevel = positionZones[0].level;
+                    
+                    if (this.inDebugMode && position.isCurrent) {
+                        console.log(`Current position in ${positionZones[0].type} zone`);
+                    }
                 }
             }
             
-            // Only check other zones if not in a bright zone
-            if (!inBrightZone) {
-                let mostRecentZone = null;
-                
-                // Iterate through zones in reverse to prioritize later zones (higher layers)
-                for (let i = this.lightingZones.length - 1; i >= 0; i--) {
-                    const zone = this.lightingZones[i];
-                    // Skip default zones
-                    if (zone.type === 'default') continue;
-                    
-                    if (Phaser.Geom.Rectangle.Contains(zone.rect, playerX, playerY)) {
-                        inAnyZone = true;
-                        // Take the first (most recent) zone we find the player in
-                        if (!mostRecentZone) {
-                            mostRecentZone = zone;
-                            currentZoneType = zone.type;
-                            targetLevel = this.zoneLevels[zone.type];
-                            
-                            if (this.currentZoneType !== zone.type) {
-                                enteredNewZone = true;
-                                if (this.scene.physics.config.debug) {
-                                    console.log(`Player entered new ${zone.type} zone`);
-                                }
-                            }
-                            break; // Exit after finding the most recent zone
-                        }
-                    }
-                }
-            }
-
             // Update the previous position for next frame check
             this.prevPlayerX = playerX;
             this.prevPlayerY = playerY;
-            this.lastCheckTime = currentTime;
-
-            // Handle transition back to default lighting when leaving all zones
-            if (!inAnyZone && this.currentZoneType) {
-                enteredNewZone = true;
-                currentZoneType = 'default';
-                targetLevel = this.zoneLevels['default'];
-                
-                if (this.scene.physics.config.debug) {
-                    console.log('Player left all lighting zones, returning to default lighting');
-                }
-            }
-        }
-
-        // Handle zone transitions
-        if (enteredNewZone || (inAnyZone && !this.currentZoneType)) {
-            // Store transition start state
-            this.transitionStartTime = this.scene.time.now;
-            this.transitionStartValue = this.currentLightLevel;
+            this.lastCheckTime = this.scene.time.now;
             
-            // Set target light level based on new zone
-            this.targetLightLevel = targetLevel;
-            this.currentZoneType = currentZoneType;
-
-            // Calculate transition duration based on light level difference
-            if (!inBrightZone) { // Skip if we're in a bright zone (already set to 500ms)
-                const levelDifference = Math.abs(this.targetLightLevel - this.currentLightLevel);
-                this.transitionDuration = Math.max(1000, levelDifference * 2000);
+            // Now determine which zone to transition to
+            let targetZoneType = null; // Changed from 'default' to null to indicate no new zone detected
+            let targetLevel = null;
+            let enteredNewZone = false;
+            
+            // If we found any zones, use the highest priority one for the target
+            if (detectedZones.length > 0) {
+                // CRITICAL: Sort all detected zones by priority
+                detectedZones.sort((a, b) => b.priority - a.priority);
+                
+                // Get the target zone (highest priority for darkness)
+                const targetZone = detectedZones[0]; 
+                
+                targetZoneType = targetZone.type;
+                targetLevel = targetZone.level;
+                
+                // CRITICAL: Always update the last non-default zone we've seen
+                if (targetZoneType !== 'default') {
+                    this.lastNonDefaultZoneType = targetZoneType;
+                    this.lastNonDefaultZoneLevel = targetLevel;
+                    this.lastZoneEnterTime = this.scene.time.now;
+                }
+                
+                // Check if we've entered a new zone type that's different from current
+                if (this.currentZoneType !== targetZoneType) {
+                    enteredNewZone = true;
+                    
+                    if (this.inDebugMode) {
+                        console.log(`%c🔄 Zone Change: ${this.currentZoneType} → ${targetZoneType}`, 
+                                    'background: #003; color: #0ff; font-weight: bold');
+                    }
+                }
+            } else {
+                // CRITICAL CHANGE: Don't reset to default if no zone found - retain last zone
+                if (this.persistentMode && this.lastNonDefaultZoneType) {
+                    // Keep using the last non-default zone we found
+                    if (this.inDebugMode) {
+                        console.log(`No zone detected - persisting previous zone: ${this.lastNonDefaultZoneType}`);
+                    }
+                } 
             }
+            
+            // Handle zone transitions - ONLY when we have a valid target or need to change
+            if (enteredNewZone && targetZoneType) {
+                // For vertical boosting into darkness, use special handling
+                const enteringDarkArea = targetLevel > this.currentLightLevel;
+                
+                if (isVerticalBoosting) {
+                    // Always log vertical boost transitions
+                    console.log(`%c⬇️ VERTICAL BOOST into ${targetZoneType} zone`,
+                                'background: #300; color: #ff0; font-weight: bold');
+                    
+                    // Use specialized vertical boost transition handler
+                    this.handleVerticalBoostTransition(targetZoneType, targetLevel, enteringDarkArea, distanceMoved);
+                } else {
+                    // Normal transition for other movement
+                    this.transitionStartTime = this.scene.time.now;
+                    this.transitionStartValue = this.currentLightLevel;
+                    
+                    // Set target light level based on new zone
+                    this.targetLightLevel = targetLevel;
+                    this.currentZoneType = targetZoneType;
+                    this.lastProcessedZoneType = targetZoneType;
 
-            if (this.scene.physics.config.debug) {
-                console.log(`Transitioning to ${currentZoneType} (${this.targetLightLevel}) over ${this.transitionDuration}ms`);
+                    // Calculate transition duration based on light level difference and movement speed
+                    if (targetZoneType === 'bright') {
+                        // Force immediate transition to full brightness
+                        this.transitionDuration = 400; // Quick transition for bright zones
+                    } else {
+                        const levelDifference = Math.abs(this.targetLightLevel - this.currentLightLevel);
+                        
+                        // Faster transitions for vertical movement
+                        if (isVerticalMovement && enteringDarkArea) {
+                            this.transitionDuration = Math.max(200, levelDifference * 400);
+                        } 
+                        // Fast transitions for entering darkness with any high-speed
+                        else if (isHighSpeedMovement && enteringDarkArea) {
+                            this.transitionDuration = Math.max(250, levelDifference * 500);
+                        } 
+                        // Normal high-speed transitions for other cases
+                        else if (isHighSpeedMovement) {
+                            this.transitionDuration = Math.max(400, levelDifference * 800);
+                        } 
+                        // Default transition speed
+                        else {
+                            this.transitionDuration = Math.max(500, levelDifference * 1000);
+                        }
+                    }
+
+                    if (this.inDebugMode) {
+                        console.log(`Transitioning to ${targetZoneType} (${this.targetLightLevel}) over ${this.transitionDuration}ms`);
+                    }
+                }
+            } 
+            // CRITICAL ADDITION: Special case when no zone found but we have a last non-default zone
+            else if (!targetZoneType && this.persistentMode && this.lastNonDefaultZoneType && 
+                    this.currentZoneType !== this.lastNonDefaultZoneType) {
+                // We should return to our last non-default zone
+                console.log(`%c🔒 Persisting last non-default zone: ${this.lastNonDefaultZoneType}`,
+                           'background: #030; color: #0f0; font-weight: bold');
+                
+                this.transitionStartTime = this.scene.time.now;
+                this.transitionStartValue = this.currentLightLevel;
+                this.targetLightLevel = this.lastNonDefaultZoneLevel;
+                this.currentZoneType = this.lastNonDefaultZoneType;
+                this.transitionDuration = 400; // Fast transition back to last valid zone
             }
         }
 
@@ -689,7 +886,7 @@ export default class LightingSystem {
 
             // Apply smooth easing
             let easedProgress;
-            if (inBrightZone) {
+            if (this.currentZoneType === 'bright') {
                 // Linear transition for bright zones
                 easedProgress = progress;
             } else {
@@ -713,6 +910,10 @@ export default class LightingSystem {
             if (Math.abs(this.currentLightLevel - this.targetLightLevel) < 0.001 || progress >= 1) {
                 this.currentLightLevel = this.targetLightLevel;
                 this.transitionActive = false;
+                
+                if (this.inDebugMode) {
+                    console.log(`Transition complete - now at ${this.currentZoneType} lighting level ${this.currentLightLevel.toFixed(2)}`);
+                }
             }
         }
 
@@ -905,27 +1106,41 @@ export default class LightingSystem {
             this.createOverlay();
         }
         
-        // Initialize graphics object for the mask
-        // This will be used either directly or as a fallback
+        // Ensure any previous mask is cleaned up
+        if (this.flashlightMask) {
+            this.flashlightMask.destroy();
+        }
+        
+        // Create a fresh graphics object for the mask
         this.flashlightMask = this.scene.make.graphics({add: false});
         
+        // Important: Reset the mask's position
+        this.flashlightMask.x = 0;
+        this.flashlightMask.y = 0;
+        
         // Create the magenta point light at the origin for visual effect
-        this.flashlightPointLight = this.scene.add.sprite(0, 0, 'bullet')
-            .setScale(0.4)
-            .setAlpha(0.8)
-            .setTint(0xff00ff) // Magenta color
-            .setBlendMode(Phaser.BlendModes.ADD)
-            .setDepth(902) 
-            .setVisible(false);
+        if (!this.flashlightPointLight) {
+            this.flashlightPointLight = this.scene.add.sprite(0, 0, 'bullet')
+                .setScale(0.4)
+                .setAlpha(0.8)
+                .setTint(0xff00ff) // Magenta color
+                .setBlendMode(Phaser.BlendModes.ADD)
+                .setDepth(902)
+                .setOrigin(0.5, 0.5) // IMPORTANT: Center origin for rotation
+                .setVisible(false);
+        }
             
         // Add a simple glow effect for the flashlight origin
-        this.flashlightGlow = this.scene.add.sprite(0, 0, 'bullet')
-            .setScale(0.7)
-            .setAlpha(0.7)
-            .setTint(0xff40ff) // Slightly lighter magenta
-            .setBlendMode(Phaser.BlendModes.ADD)
-            .setDepth(901)
-            .setVisible(false);
+        if (!this.flashlightGlow) {
+            this.flashlightGlow = this.scene.add.sprite(0, 0, 'bullet')
+                .setScale(0.7)
+                .setAlpha(0.7)
+                .setTint(0xff40ff) // Slightly lighter magenta
+                .setBlendMode(Phaser.BlendModes.ADD)
+                .setDepth(901)
+                .setOrigin(0.5, 0.5) // IMPORTANT: Center origin for rotation
+                .setVisible(false);
+        }
             
         // Check if we're using a custom mask image
         if (customMaskKey && this.scene.textures.exists(customMaskKey)) {
@@ -949,6 +1164,60 @@ export default class LightingSystem {
             this.usingCustomMask = true;
         } else {
             console.log('Using geometry-based mask');
+            
+            // Draw a default cone shape
+            this.flashlightMask.clear();
+            this.flashlightMask.fillStyle(0xffffff);
+            
+            // Draw a directional cone shape
+            const defaultAngle = 0; // Default facing right
+            const coneAngle = Math.PI / 2.5; // Wider cone (~72 degrees)
+            const coneLength = 250; // Longer cone
+            
+            // Draw the main cone with gradient
+            const steps = 5; // Add gradient steps
+            for (let step = 0; step < steps; step++) {
+                const stepLength = coneLength * (1 - step/steps);
+                const stepWidth = coneAngle * (1 - step/(steps*2));
+                const alpha = 1 - (step/steps) * 0.2; // Fade slightly at each step
+                
+                this.flashlightMask.fillStyle(0xffffff, alpha);
+                this.flashlightMask.beginPath();
+                this.flashlightMask.moveTo(0, 0);
+                this.flashlightMask.lineTo(
+                    Math.cos(defaultAngle - stepWidth/2) * stepLength,
+                    Math.sin(defaultAngle - stepWidth/2) * stepLength
+                );
+                this.flashlightMask.arc(
+                    0, 0,
+                    stepLength,
+                    defaultAngle - stepWidth/2,
+                    defaultAngle + stepWidth/2
+                );
+                this.flashlightMask.lineTo(0, 0);
+                this.flashlightMask.fillPath();
+            }
+            
+            // Add a bright inner cone
+            this.flashlightMask.fillStyle(0xffffff, 1);
+            this.flashlightMask.beginPath();
+            this.flashlightMask.moveTo(0, 0);
+            this.flashlightMask.lineTo(
+                Math.cos(defaultAngle - coneAngle/4) * (coneLength/2),
+                Math.sin(defaultAngle - coneAngle/4) * (coneLength/2)
+            );
+            this.flashlightMask.arc(
+                0, 0,
+                coneLength/2,
+                defaultAngle - coneAngle/4,
+                defaultAngle + coneAngle/4
+            );
+            this.flashlightMask.lineTo(0, 0);
+            this.flashlightMask.fillPath();
+            
+            // Add a bright center point
+            this.flashlightMask.fillStyle(0xffffff, 1);
+            this.flashlightMask.fillCircle(0, 0, 10);
             
             // Create a geometry mask from the graphics object
             this.lightMask = this.flashlightMask.createGeometryMask();
@@ -1052,85 +1321,129 @@ export default class LightingSystem {
     updateFlashlightCone() {
         if (!this.flashlightEnabled || !this.player) return;
 
-        // Get player position
-        const playerX = this.player?.sprite ? this.player.sprite.x : this.player?.x || 0;
-        const playerY = this.player?.sprite ? this.player.sprite.y : this.player?.y || 0;
+        // Get diver arm directly from scene
+        const diverArm = this.scene.diverArm;
+        if (!diverArm) return;
 
-        // Directly check if player is facing left using sprite.flipX 
-        const isFacingLeft = this.player.sprite && this.player.sprite.flipX;
+        // Use raw angle (trueDirection) for both position and rotation
+        const angle = diverArm.trueDirection;
         
-        // Position the magenta light
-        let lightX, lightY;
+        // Check if player is facing left
+        const isFacingLeft = diverArm.isFacingLeft;
         
-        // Use new offset values for the upper-right position
-        // Adjust these values to move the light to match the red arrow in the screenshot
-        const lightOffsetX = isFacingLeft ? -45 : 45; // Increased from 40 to 45 - more outward
-        const lightOffsetY = -40; // Changed from -50 to -40 - moved down by 10px
+        // Use the arm's tip position directly
+        let x, y;
         
-        // Use fixed offsets instead of marker-based positioning for reliability
-        lightX = playerX + lightOffsetX;
-        lightY = playerY + lightOffsetY;
-        
-        // Position the point light and glow
-        if (this.flashlightPointLight) {
-            this.flashlightPointLight.setPosition(lightX, lightY);
+        // Check if tip position is available from the arm
+        if (diverArm.tipX !== undefined && diverArm.tipY !== undefined) {
+            // Use the pre-calculated tip position directly
+            x = diverArm.tipX;
+            y = diverArm.tipY;
+        } else {
+            // Fallback calculation if tip position is not available
+            const armLength = 70;
+            x = diverArm.x + Math.cos(angle) * armLength;
+            y = diverArm.y + Math.sin(angle) * armLength;
         }
+
+        // Update flashlight position and rotation using raw angle
+        this.flashlightPointLight.setPosition(x, y);
+        this.flashlightPointLight.setRotation(angle);
         
         if (this.flashlightGlow) {
-            this.flashlightGlow.setPosition(lightX, lightY);
+            this.flashlightGlow.setPosition(x, y);
+            this.flashlightGlow.setRotation(angle);
+        }
+
+        // Handle mask based on whether we're using a custom mask or not
+        if (this.usingCustomMask && this.customMaskImage) {
+            // For custom image masks, update position and rotation directly
+            this.customMaskImage.setPosition(x, y);
+            this.customMaskImage.setRotation(angle);
             
-            // Add pulsing effect to the glow
-            if (!this.flashlightGlow.timeline) {
-                this.flashlightGlow.timeline = this.scene.tweens.add({
-                    targets: this.flashlightGlow,
-                    alpha: { from: 0.5, to: 0.8 },
-                    scale: { from: 0.8, to: 0.95 }, // Significantly reduced max scale from 1.1 to 0.95
-                    duration: 500,
-                    yoyo: true,
-                    repeat: -1,
-                    ease: 'Sine.easeInOut'
-                });
+            // Recreate the bitmap mask to ensure it's properly updated
+            this.overlay.clearMask();
+            this.lightMask = this.customMaskImage.createBitmapMask();
+            this.lightMask.invertAlpha = true;
+            this.overlay.setMask(this.lightMask);
+        } else {
+            // For geometry-based masks, completely recreate
+            this.overlay.clearMask();
+            if (this.flashlightMask) {
+                this.flashlightMask.destroy();
             }
+            this.flashlightMask = this.scene.make.graphics({add: false});
+            
+            // Position the mask at the exact same coordinates as the pin light
+            this.flashlightMask.x = x;
+            this.flashlightMask.y = y;
+            
+            // Create cone shape pointing in the direction of angle
+            const graphics = this.flashlightMask;
+            graphics.fillStyle(0xffffff, 1);
+            
+            // Draw arc for the cone
+            const coneAngle = Math.PI / 2.5; // ~72 degree cone
+            const coneLength = 250;
+            
+            // Draw the main cone with gradient
+            const steps = 5; // Add gradient steps
+            for (let step = 0; step < steps; step++) {
+                const stepLength = coneLength * (1 - step/steps);
+                const stepWidth = coneAngle * (1 - step/(steps*2));
+                const alpha = 1 - (step/steps) * 0.2; // Fade slightly at each step
+                
+                graphics.fillStyle(0xffffff, alpha);
+                graphics.beginPath();
+                graphics.moveTo(0, 0);
+                graphics.lineTo(
+                    Math.cos(angle - stepWidth/2) * stepLength,
+                    Math.sin(angle - stepWidth/2) * stepLength
+                );
+                graphics.arc(
+                    0, 0,
+                    stepLength,
+                    angle - stepWidth/2,
+                    angle + stepWidth/2
+                );
+                graphics.lineTo(0, 0);
+                graphics.fillPath();
+            }
+            
+            // Add a bright inner cone
+            graphics.fillStyle(0xffffff, 1);
+            graphics.beginPath();
+            graphics.moveTo(0, 0);
+            graphics.lineTo(
+                Math.cos(angle - coneAngle/4) * (coneLength/2),
+                Math.sin(angle - coneAngle/4) * (coneLength/2)
+            );
+            graphics.arc(
+                0, 0,
+                coneLength/2,
+                angle - coneAngle/4,
+                angle + coneAngle/4
+            );
+            graphics.lineTo(0, 0);
+            graphics.fillPath();
+            
+            // For better visualization, add an inner circle at origin
+            graphics.fillStyle(0xffffff, 1);
+            graphics.fillCircle(0, 0, 10); // Small circle at origin
+            
+            // Create a fresh geometry mask
+            this.lightMask = this.flashlightMask.createGeometryMask();
+            this.lightMask.setInvertAlpha(true);
+            
+            // Apply the mask to the overlay
+            this.overlay.setMask(this.lightMask);
         }
         
-        if (this.usingCustomMask && this.customMaskImage) {
-            // Update custom image mask position
-            // Move the mask in the direction the player is facing, but not too far
-            const extraOffset = isFacingLeft ? -500 : 500; // Move it 500 pixels in facing direction
-            this.customMaskImage.setPosition(lightX + extraOffset, lightY);
-            
-            // Flip the mask image based on direction
-            this.customMaskImage.setScale(isFacingLeft ? -1 : 1, 1);
-            
-            // Proper origin should be set on the image itself
-            // If needed, adjust rotation here
-        } else {
-            // Update the geometry mask with the cone shape
-            this.flashlightMask.clear();
-            this.flashlightMask.fillStyle(0xffffff, 1);
-            
-            // Calculate the cone's end points
-            const coneLength = 600; // Length of the cone
-            const coneWidth = 350;  // Width at the end of the cone
-            
-            // Draw a cone/triangle shape
-            if (isFacingLeft) {
-                // Facing left: cone opens to the left
-                this.flashlightMask.beginPath();
-                this.flashlightMask.moveTo(lightX, lightY); // Start at light origin
-                this.flashlightMask.lineTo(lightX - coneLength, lightY - coneWidth/2); // Top end point
-                this.flashlightMask.lineTo(lightX - coneLength, lightY + coneWidth/2); // Bottom end point
-                this.flashlightMask.closePath();
-                this.flashlightMask.fillPath();
-            } else {
-                // Facing right: cone opens to the right
-                this.flashlightMask.beginPath();
-                this.flashlightMask.moveTo(lightX, lightY); // Start at light origin
-                this.flashlightMask.lineTo(lightX + coneLength, lightY - coneWidth/2); // Top end point
-                this.flashlightMask.lineTo(lightX + coneLength, lightY + coneWidth/2); // Bottom end point
-                this.flashlightMask.closePath();
-                this.flashlightMask.fillPath();
-            }
+        // Debug logging
+        if (this.scene?.physics?.config?.debug) {
+            console.log(`Flashlight updated - angle: ${Phaser.Math.RadToDeg(angle).toFixed(1)}°, ` +
+                       `position: (${x.toFixed(1)}, ${y.toFixed(1)}), ` +
+                       `using: ${this.usingCustomMask ? 'custom image mask' : 'geometry mask'}`);
         }
     }
 
@@ -1141,57 +1454,103 @@ export default class LightingSystem {
     toggleFlashlight(customMaskKey = null) {
         this.flashlightEnabled = !this.flashlightEnabled;
         
-        // Create flashlight if needed
-        if (this.flashlightEnabled && !this.lightMask) {
-            this.initializeFlashlight(customMaskKey);
+        // Clean up any existing resources
+        if (this.lightMask) {
+            if (this.overlay) {
+                this.overlay.clearMask();
+            }
+            this.lightMask = null;
+        }
+        
+        if (this.flashlightMask) {
+            this.flashlightMask.destroy();
+            this.flashlightMask = null;
+        }
+        
+        if (this.customMaskImage) {
+            this.customMaskImage.destroy();
+            this.customMaskImage = null;
         }
         
         if (this.flashlightEnabled) {
-            // If the player has a sprite, check flipX first to determine direction
-            if (this.player && this.player.sprite) {
-                if (this.player.sprite.flipX !== undefined) {
-                    // Use flipX to determine direction (same as bullets)
-                    this.flashlightRotation = this.player.sprite.flipX ? Math.PI : 0;
-                    console.log(`Flashlight enabled, using player flipX: ${this.player.sprite.flipX}`);
-                }
-                // If no flipX, try rotation
-                else if (this.player.rotation !== undefined) {
-                    this.flashlightRotation = this.player.rotation;
-                } else if (this.player.sprite.rotation !== undefined) {
-                    this.flashlightRotation = this.player.sprite.rotation;
-                } else {
-                    // Default to right-facing if no rotation found
-                    this.flashlightRotation = 0;
-                }
+            // Create the basic flashlight elements
+            // The magenta pin light at origin
+            if (!this.flashlightPointLight) {
+                this.flashlightPointLight = this.scene.add.sprite(0, 0, 'bullet')
+                    .setScale(0.4)
+                    .setAlpha(0.8)
+                    .setTint(0xff00ff) // Magenta color
+                    .setBlendMode(Phaser.BlendModes.ADD)
+                    .setDepth(902)
+                    .setOrigin(0.5, 0.5)
+                    .setVisible(true);
             } else {
-                // Default to right-facing if no player sprite
-                this.flashlightRotation = 0;
+                this.flashlightPointLight.setVisible(true);
             }
             
-            // Show the point light and glow at the flashlight origin
-            if (this.flashlightPointLight) this.flashlightPointLight.setVisible(true);
-            if (this.flashlightGlow) this.flashlightGlow.setVisible(true);
-            
-            // Make sure to apply the mask to the overlay
-            if (this.lightMask && this.overlay) {
-                this.overlay.setMask(this.lightMask);
+            // Add glow effect around the origin point
+            if (!this.flashlightGlow) {
+                this.flashlightGlow = this.scene.add.sprite(0, 0, 'bullet')
+                    .setScale(0.7)
+                    .setAlpha(0.7)
+                    .setTint(0xff40ff) // Slightly lighter magenta
+                    .setBlendMode(Phaser.BlendModes.ADD)
+                    .setDepth(901)
+                    .setOrigin(0.5, 0.5)
+                    .setVisible(true);
+            } else {
+                this.flashlightGlow.setVisible(true);
             }
             
-            // Update flashlight position and rotation
-            this.updateFlashlightCone();
+            // Check if we should use a custom mask
+            if (customMaskKey && this.scene.textures.exists(customMaskKey)) {
+                console.log(`Using custom mask image: ${customMaskKey}`);
+                this.usingCustomMask = true;
+                
+                // Create the custom mask image
+                this.customMaskImage = this.scene.make.image({
+                    x: 0,
+                    y: 0,
+                    key: customMaskKey,
+                    add: false // Important: don't add to display list
+                });
+                
+                // Make sure the custom mask has its origin at the center
+                this.customMaskImage.setOrigin(0.5, 0.5);
+                
+                // Create the bitmap mask from the image
+                this.lightMask = this.customMaskImage.createBitmapMask();
+                this.lightMask.invertAlpha = true;
+            } else {
+                // Use geometry-based mask
+                this.usingCustomMask = false;
+                this.flashlightMask = this.scene.make.graphics({add: false});
+            }
             
-            console.log(`Flashlight enabled with ${this.usingCustomMask ? 'custom image' : 'graphics-based'} mask`);
+            // Immediately update the position and create the mask
+            try {
+                this.updateFlashlightCone();
+            } catch (error) {
+                console.error('Error initializing flashlight cone:', error);
+            }
+            
+            console.log(`Flashlight enabled with ${this.usingCustomMask ? 'custom image mask' : 'geometry-based mask'}`);
         } else {
-            // Hide all flashlight elements when turning it off
-            if (this.flashlightPointLight) this.flashlightPointLight.setVisible(false);
-            if (this.flashlightGlow) this.flashlightGlow.setVisible(false);
+            // Turn off the flashlight
+            if (this.flashlightPointLight) {
+                this.flashlightPointLight.setVisible(false);
+            }
             
-            // CRITICAL FIX: Clear the mask from the overlay when turning off
+            if (this.flashlightGlow) {
+                this.flashlightGlow.setVisible(false);
+            }
+            
+            // Clear the mask
             if (this.overlay) {
                 this.overlay.clearMask();
             }
             
-            console.log(`Flashlight disabled`);
+            console.log('Flashlight disabled');
         }
     }
 
@@ -1210,16 +1569,49 @@ export default class LightingSystem {
         const wasEnabled = this.flashlightEnabled;
         if (wasEnabled) {
             this.flashlightEnabled = false;
+            
+            // Hide flashlight elements
+            if (this.flashlightPointLight) this.flashlightPointLight.setVisible(false);
+            if (this.flashlightGlow) this.flashlightGlow.setVisible(false);
         }
         
         // Clean up existing mask if any
         if (this.lightMask) {
-            this.overlay.clearMask();
+            if (this.overlay) {
+                this.overlay.clearMask();
+            }
             this.lightMask = null;
         }
         
+        // Clean up any existing custom mask image
+        if (this.customMaskImage) {
+            this.customMaskImage.destroy();
+            this.customMaskImage = null;
+        }
+        
         // Reinitialize with the custom mask
-        this.initializeFlashlight(imageKey);
+        console.log(`Reinitializing flashlight with custom mask: ${imageKey}`);
+        
+        // Set the custom mask key
+        this.usingCustomMask = true;
+        
+        // Create the custom mask image
+        this.customMaskImage = this.scene.make.image({
+            x: 0,
+            y: 0,
+            key: imageKey,
+            add: false
+        });
+        
+        // CRITICAL: Make sure the origin is at the center for proper rotation
+        // For flashlight_cone1.png, this ensures the mask origin is at the
+        // center of the image, which should align with the magenta pin light.
+        //
+        // When creating custom masks in Photoshop:
+        // 1. The mask origin should be at the exact center of the image (50%, 50%)
+        // 2. White areas will be visible, black areas will be masked out
+        // 3. The cone should point to the right (0 degrees) from the center
+        this.customMaskImage.setOrigin(0.5, 0.5);
         
         // Restore the previous state
         this.flashlightEnabled = wasEnabled;
@@ -1232,11 +1624,196 @@ export default class LightingSystem {
             this.flashlightGlow.setVisible(wasEnabled);
         }
         
-        // Update position if enabled
+        // Update position if enabled (safely)
         if (wasEnabled) {
-            this.updateFlashlightCone();
+            try {
+                this.updateFlashlightCone();
+            } catch (error) {
+                console.error('Error updating flashlight cone:', error);
+            }
         }
         
         return true;
+    }
+
+    /**
+     * Create a custom flashlight mask template
+     * This is a utility function to help create a properly formatted flashlight mask image
+     */
+    createCustomFlashlightMaskTemplate() {
+        try {
+            // Create a new graphics object for the template
+            const templateGraphics = this.scene.add.graphics();
+            
+            // Set canvas size
+            const width = 512;
+            const height = 512;
+            
+            // Clear any previous content
+            templateGraphics.clear();
+            
+            // Draw a black background (will be masked out)
+            templateGraphics.fillStyle(0x000000, 1);
+            templateGraphics.fillRect(0, 0, width, height);
+            
+            // Calculate center point
+            const centerX = width / 2;
+            const centerY = height / 2;
+            
+            // Draw the main cone shape (white will be visible)
+            templateGraphics.fillStyle(0xffffff, 1);
+            
+            // Draw cone pointing right from center (0 degrees)
+            templateGraphics.beginPath();
+            templateGraphics.moveTo(centerX, centerY); // Start at center
+            
+            // Draw cone with gradient
+            const coneAngle = Math.PI / 2.5; // ~72 degree cone
+            const coneLength = width / 2; // Half the width
+            
+            // Draw arc for end of cone
+            templateGraphics.arc(
+                centerX, centerY,
+                coneLength,
+                -coneAngle/2,
+                coneAngle/2
+            );
+            
+            // Close path back to center
+            templateGraphics.lineTo(centerX, centerY);
+            templateGraphics.fillPath();
+            
+            // Add inner circle at origin for the light source
+            templateGraphics.fillStyle(0xffffff, 1);
+            templateGraphics.fillCircle(centerX, centerY, 20);
+            
+            // Generate texture from this graphics object
+            const rt = this.scene.add.renderTexture(0, 0, width, height);
+            rt.draw(templateGraphics);
+            
+            // Generate a key name
+            const key = 'custom_flashlight_mask';
+            
+            // Save as a texture in the texture manager
+            rt.saveTexture(key);
+            
+            // Clean up
+            rt.destroy();
+            templateGraphics.destroy();
+            
+            console.log(`Created custom flashlight mask template with key: '${key}'`);
+            console.log(`To use: call lightingSystem.setCustomFlashlightMask('${key}')`);
+            
+            return key;
+        } catch (error) {
+            console.error('Error creating custom flashlight mask template:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Initialize debug visualizations for lighting zones
+     */
+    setupDebugVisuals() {
+        if (!this.scene.physics.config.debug) return;
+        
+        // Create debug graphics for zone visualization
+        this.debugGraphics = this.scene.add.graphics();
+        this.debugGraphics.setDepth(10000); // Very high depth to ensure visibility
+        
+        // Create debug text for lighting state
+        this.debugText = this.scene.add.text(10, 120, '', {
+            font: '14px Arial',
+            fill: '#00ff00',
+            backgroundColor: '#000000',
+            padding: { x: 5, y: 5 }
+        });
+        this.debugText.setScrollFactor(0);
+        this.debugText.setDepth(10001);
+        this.debugText.setAlpha(0.8);
+    }
+
+    /**
+     * Debug method to visualize all lighting zones
+     */
+    debugZones() {
+        if (!this.scene.physics.config.debug || !this.debugGraphics) return;
+        
+        console.log('Visualizing lighting zones:', this.lightingZones.length);
+        
+        // Clear previous visualizations
+        this.debugGraphics.clear();
+        
+        // Draw each zone with different colors based on type
+        this.lightingZones.forEach((zone, index) => {
+            let color;
+            let alpha = 0.15;
+            
+            switch(zone.type) {
+                case 'bright':
+                    color = 0xffff00; // Yellow
+                    break;
+                case 'dim':
+                    color = 0x00ffff; // Cyan
+                    break;
+                case 'dark':
+                    color = 0x0000ff; // Blue
+                    break;
+                case 'black':
+                    color = 0xff00ff; // Magenta
+                    alpha = 0.25;
+                    break;
+                default:
+                    color = 0x00ff00; // Green for default zones
+                    alpha = 0.1;
+            }
+            
+            // Draw zone outline
+            this.debugGraphics.lineStyle(2, color, 1);
+            this.debugGraphics.strokeRect(
+                zone.rect.x, zone.rect.y,
+                zone.rect.width, zone.rect.height
+            );
+            
+            // Fill zone with semi-transparent color
+            this.debugGraphics.fillStyle(color, alpha);
+            this.debugGraphics.fillRect(
+                zone.rect.x, zone.rect.y,
+                zone.rect.width, zone.rect.height
+            );
+            
+            // Add text label with zone type
+            const labelX = zone.rect.x + 10;
+            const labelY = zone.rect.y + 10;
+            const label = this.scene.add.text(
+                labelX, labelY,
+                `${zone.type} (${index})`,
+                { font: '12px Arial', fill: '#ffffff', backgroundColor: '#000000' }
+            );
+            label.setDepth(10001);
+        });
+        
+        console.log('Zones visualization complete');
+    }
+
+    /**
+     * Update debug text with current lighting information
+     */
+    updateDebugText() {
+        if (!this.debugText) return;
+        
+        const now = this.scene.time.now;
+        
+        const text = [
+            `Lighting Zone: ${this.currentZoneType || 'none'}`,
+            `Light Level: ${this.currentLightLevel.toFixed(2)}`,
+            `Target Level: ${this.targetLightLevel.toFixed(2)}`,
+            `Transition: ${this.transitionActive ? 'Active' : 'Inactive'}`,
+            `Last Zone: ${this.lastNonDefaultZoneType || 'none'}`,
+            `Persistent: ${this.persistentMode ? 'ON' : 'OFF'}`,
+            `Cooldown: ${Math.max(0, this.lastZoneEnterTime - now)}ms left`
+        ].join('\n');
+        
+        this.debugText.setText(text);
     }
 } 

@@ -868,6 +868,11 @@
                          "value":50
                         }, 
                         {
+                         "name":"timer",
+                         "type":"int",
+                         "value":25
+                        }, 
+                        {
                          "name":"variation",
                          "type":"int",
                          "value":2
@@ -987,9 +992,48 @@
          "visible":true,
          "x":0,
          "y":0
+        }, 
+        {
+         "draworder":"topdown",
+         "id":15,
+         "name":"jellyfish",
+         "objects":[
+                {
+                 "height":0,
+                 "id":26,
+                 "name":"jellyfish",
+                 "point":true,
+                 "properties":[
+                        {
+                         "name":"charge",
+                         "type":"int",
+                         "value":100
+                        }, 
+                        {
+                         "name":"timer",
+                         "type":"int",
+                         "value":25
+                        }, 
+                        {
+                         "name":"type",
+                         "type":"string",
+                         "value":"jellyfish"
+                        }],
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":460,
+                 "y":1560
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
         }],
- "nextlayerid":15,
- "nextobjectid":25,
+ "nextlayerid":16,
+ "nextobjectid":27,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",

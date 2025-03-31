@@ -16,6 +16,12 @@ export const PLAYER = {
     ACCELERATION: 200,
     GRAVITY: 200,
     TREAD_FORCE: 185,  // Slightly increased to allow initial good resistance
+    FAST_FALL: {
+        SPEED: 350,         // Downward velocity when fast falling
+        POSITION_STEP: 1,   // Pixels to move down each frame
+        GRAVITY_MULT: 2.5,  // Gravity multiplier
+        DRAG: 50            // Lower drag for faster falling
+    },
     TREAD_WATER: {
         VELOCITY_DAMPEN: 0.96,
         MAX_FALL_SPEED: 300,    
@@ -70,18 +76,27 @@ export const PLAYER = {
 export const ANIMATIONS = {
     IDLE_SWIM: {
         KEY: 'idle_swim',
-        FRAME_RATE: 6,
-        FRAME_WIDTH: 87,     // Updated to match actual sprite dimensions (261 ÷ 3 frames)
-        FRAME_HEIGHT: 102,   // Updated to match actual sprite height
-        FRAMES: 3            // Total number of frames in the animation
+        FRAME_RATE: 10,
+        FRAME_WIDTH: 139,
+        FRAME_HEIGHT: 150,
+        TOTAL_FRAMES: 8,
+        TEXTURE_KEY: 'diver_swim'
+    },
+    SWIM: {
+        KEY: 'swim',
+        FRAME_RATE: 10,
+        FRAME_WIDTH: 131, // Each frame is exactly 131px wide
+        FRAME_HEIGHT: 150, // Each frame is exactly 150px tall 
+        TOTAL_FRAMES: 8,  // Total of 8 frames
+        TEXTURE_KEY: 'diver_swim_new'
     },
     IDLE_SWIM_NEW: {
-        KEY: 'idle_swim',    // Use the same animation key for compatibility
-        FRAME_RATE: 8,      // Reduced from 10 to 8 for smoother animation
-        FRAME_WIDTH: 139,     // Width of each frame in the new spritesheet
-        FRAME_HEIGHT: 150,   // Height of each frame in the new spritesheet
-        FRAMES: 8,           // Total number of frames in the new animation
-        TEXTURE_KEY: 'diver_swim_new' // The key for the new texture
+        KEY: 'idle_swim',
+        FRAME_RATE: 8,
+        FRAME_WIDTH: 131,  // Calculated from 1046 ÷ 8 = 130.75, rounded to 131
+        FRAME_HEIGHT: 150, // Full height of the sprite sheet
+        TOTAL_FRAMES: 8,
+        TEXTURE_KEY: 'diver_swim_new'
     },
     DROWNING: {
         KEY: 'drowning',

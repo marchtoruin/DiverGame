@@ -68,11 +68,43 @@ export default class BulletSystem {
         if (this.isFiring || this.scene.input.activePointer.isDown) {
             // Check if enough time has passed since last shot
             if (time - this.lastFireTime >= this.fireRate) {
-                // Only fire if we have a player reference
-                if (this.scene.player?.sprite) {
-                    // Use player's facing direction instead of mouse position
-                    const direction = this.scene.player.sprite.flipX ? -1 : 1;
-                    this.fireBullet(this.scene.player.sprite.x, this.scene.player.sprite.y, direction);
+                // Only fire if we have a player reference and diver arm
+                if (this.scene.player?.sprite && this.scene.diverArm) {
+                    // Get the arm tip position
+                    const diverArm = this.scene.diverArm;
+                    
+                    // Get bullet origin position
+                    let bulletX, bulletY;
+                    
+                    // Check if we have pre-calculated tip position
+                    if (diverArm.tipX !== undefined && diverArm.tipY !== undefined) {
+                        // Use the pre-calculated tip position directly
+                        bulletX = diverArm.tipX;
+                        bulletY = diverArm.tipY;
+                    } else {
+                        // Fallback calculation if tip position is not available
+                        const armLength = 70;
+                        // Use trueDirection for tip calculation
+                        const trueDirection = diverArm.trueDirection || 0;
+                        bulletX = diverArm.x + Math.cos(trueDirection) * armLength;
+                        bulletY = diverArm.y + Math.sin(trueDirection) * armLength;
+                    }
+                    
+                    // Use the raw angle directly for bullet direction
+                    const trueDirection = diverArm.trueDirection || 0;
+                    
+                    // Calculate velocity components directly from true direction
+                    const dirX = Math.cos(trueDirection);
+                    const dirY = Math.sin(trueDirection);
+                    
+                    console.log(`[BULLET] Firing using trueDirection ${Phaser.Math.RadToDeg(trueDirection).toFixed(1)}°, ` +
+                               `direction: (${dirX.toFixed(2)}, ${dirY.toFixed(2)}), ` +
+                               `from: (${bulletX.toFixed(0)}, ${bulletY.toFixed(0)})`);
+                    
+                    // Fire the bullet with the raw direction components
+                    this.fireBullet(bulletX, bulletY, { x: dirX, y: dirY });
+                    
+                    // Update last fire time
                     this.lastFireTime = time;
                 }
             }
@@ -81,9 +113,9 @@ export default class BulletSystem {
     
     /**
      * Fire a bullet from the player
-     * @param {number} x - X position of the player
-     * @param {number} y - Y position of the player
-     * @param {number} direction - Direction of the bullet
+     * @param {number} x - X position of the bullet origin
+     * @param {number} y - Y position of the bullet origin
+     * @param {number|object} direction - Direction of the bullet (number for left/right or vector object with x,y for precise direction)
      */
     fireBullet(x, y, direction) {
         // Check if player has enough oxygen to fire
@@ -91,30 +123,33 @@ export default class BulletSystem {
             return; // Can't fire if not enough oxygen
         }
 
-        // Use manually tuned offsets based on the player sprite
-        let bulletX = x;
-        let bulletY = y;
-        
-        // Different offsets based on player direction
-        if (direction > 0) { // Facing right
-            bulletX = x + 50; // Moved out by 12px (was +38)
-            bulletY = y - 40; // Moved up by 2px (was -38)
-        } else { // Facing left
-            bulletX = x - 50; // Moved out by 12px (was -38)
-            bulletY = y - 40; // Moved up by 2px (was -38)
-        }
-        
         let bullet = this.bullets.getFirstDead(true);
         
         if (bullet) {
-            bullet.fire(bulletX, bulletY, direction);
-            
-            // The depth is now set in the Bullet class constructor
-            // to be higher than the darkness overlay (950)
+            // If direction is a vector object with x and y properties, use it directly
+            if (typeof direction === 'object' && direction.x !== undefined && direction.y !== undefined) {
+                // Use the provided origin point without offset
+                bullet.fire(x, y, direction);
+            } else {
+                // Legacy support for simple left/right direction
+                // Different offsets based on player direction
+                let bulletX = x;
+                let bulletY = y;
+                
+                if (direction > 0) { // Facing right
+                    bulletX = x + 50;
+                    bulletY = y - 40;
+                } else { // Facing left
+                    bulletX = x - 50;
+                    bulletY = y - 40;
+                }
+                
+                bullet.fire(bulletX, bulletY, direction);
+            }
             
             // Add a subtle camera shake effect when firing
             if (this.scene.cameras && this.scene.cameras.main) {
-                this.scene.cameras.main.shake(50, 0.003, false); // Duration 50ms, intensity 0.003 (very subtle)
+                this.scene.cameras.main.shake(50, 0.003, false);
             }
             
             // Consume oxygen for firing

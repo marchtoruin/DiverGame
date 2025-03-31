@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="100" height="200" tilewidth="32" tileheight="32" infinite="0" nextlayerid="15" nextobjectid="24">
+<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="100" height="200" tilewidth="32" tileheight="32" infinite="0" nextlayerid="16" nextobjectid="27">
  <editorsettings>
   <export target="../maps/level1.json" format="json"/>
  </editorsettings>
@@ -841,6 +841,7 @@
   <object id="17" name="air_pocket" x="1157.33" y="1152">
    <properties>
     <property name="oxygen" type="int" value="50"/>
+    <property name="timer" type="int" value="25"/>
     <property name="variation" type="int" value="2"/>
    </properties>
    <point/>
@@ -866,6 +867,21 @@
    <properties>
     <property name="type" value="black"/>
    </properties>
+  </object>
+  <object id="24" name="bright" x="-136" y="2184" width="3536" height="224">
+   <properties>
+    <property name="type" value="bright"/>
+   </properties>
+  </object>
+ </objectgroup>
+ <objectgroup id="15" name="jellyfish">
+  <object id="26" name="jellyfish" x="460" y="1560">
+   <properties>
+    <property name="charge" type="int" value="100"/>
+    <property name="timer" type="int" value="25"/>
+    <property name="type" value="jellyfish"/>
+   </properties>
+   <point/>
   </object>
  </objectgroup>
 </map>

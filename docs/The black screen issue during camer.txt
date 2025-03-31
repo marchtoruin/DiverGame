@@ -1,0 +1,95 @@
+The black screen issue during camera shake and particle effects in Phaser 3 typically stems from camera positioning conflicts, rendering overload, or effect stacking. Here are the key causes and solutions:
+
+**1. Camera Coordinate Precision Issues**  
+Phaser 3 can struggle with subpixel camera positions during dynamic effects. Your camera shake might be generating fractional coordinates like (152.3471, 84.2295) which can cause rendering artifacts:
+```javascript
+// Round camera position during updates
+this.cameras.main.setScroll(
+    Math.round(this.cameras.main.scrollX),
+    Math.round(this.cameras.main.scrollY)
+);
+```
+Enable `roundPixels` in game config for automatic rounding[3][6]:
+```javascript
+roundPixels: true
+```
+
+**2. Camera Effect Conflicts**  
+Camera shake combined with other effects (zoom/lerp) can create rendering conflicts. If using camera lerp:
+```javascript
+// Reduce lerp values during shake effects
+this.cameras.main.setLerp(0.1, 0.1); // Default is (0.1, 0.1)
+```
+Disable lerp temporarily during intense shake:
+```javascript
+this.cameras.main.setLerp(0, 0);
+game.camera.shake(500, 0.01);
+this.time.delayedCall(500, () => {
+    this.cameras.main.setLerp(0.1, 0.1);
+});
+```
+
+**3. Particle Render Overload**  
+Complex particle emitters during boosts can overwhelm WebGL:
+```javascript
+// Optimize particle settings
+this.add.particles(0, 0, 'boost', {
+    frame: 'circle',
+    scale: { start: 0.5, end: 0 },
+    lifespan: 500,
+    quantity: 5, // Reduce from default 10
+    blendMode: 'ADD'
+});
+```
+Key optimizations:
+- Set `active: false` for off-screen emitters
+- Use `frequency: -1` for single bursts
+- Limit alpha channels in particle textures
+
+**4. Effect Stacking**  
+Multiple shake effects overlapping can create camera instability. Use a queue system:
+```javascript
+let isShaking = false;
+
+function applyBoostEffect() {
+    if (!isShaking) {
+        isShaking = true;
+        this.cameras.main.shake(200, 0.005)
+            .once('camerashakecomplete', () => {
+                isShaking = false;
+            });
+    }
+}
+```
+
+**Additional Checks:**
+- Verify camera bounds with `this.cameras.main.setBounds()`
+- Monitor GPU memory usage during particle bursts
+- Test with `antialias: false` in game config for performance
+
+These adjustments maintain visual effects while preventing rendering glitches. The most common fix is combining coordinate rounding with particle optimization[3][5][7].
+
+Citations:
+[1] https://www.html5gamedevs.com/topic/32408-camera-shake-black-bars-problem/
+[2] https://stackoverflow.com/questions/29653072/phaser-screen-goes-black-without-errors
+[3] https://phaser.discourse.group/t/random-bizzare-black-screen-mid-game/6037
+[4] https://github.com/phaserjs/phaser/issues/6810
+[5] https://github.com/phaserjs/phaser/discussions/6345
+[6] https://docs.phaser.io/api-documentation/class/cameras-scene2d-camera
+[7] https://stackoverflow.com/questions/57729055/phaser-3-why-is-my-this-cameras-main-fadeout-effect-not-starting-immediately
+[8] https://rexrainbow.github.io/phaser3-rex-notes/docs/site/camera-effects/
+[9] https://forum.gdevelop.io/t/black-screen-from-combination-of-wait-x-seconds-and-camerashake-extensions/47493
+[10] https://stackoverflow.com/questions/54170646/black-screen-when-changing-scene-phaser-3
+[11] https://docs.phaser.io/api-documentation/class/gameobjects-image
+[12] https://phaser.discourse.group/t/black-screen-only/1177
+[13] https://phaser.discourse.group/t/camera-issue-causing-game-to-have-black-screen/10206
+[14] https://shakuro.com/blog/phaser-js-a-step-by-step-tutorial-on-making-a-phaser-3-game
+[15] https://rexrainbow.github.io/phaser3-rex-notes/docs/site/shader-builtin/
+[16] https://stackoverflow.com/questions/78411372/why-is-the-camera-not-following-the-player-if-phaser-3
+[17] https://www.reddit.com/r/phaser/comments/u7n8hy/getting_a_black_screen_in_tutorial/
+[18] https://gamedev.stackexchange.com/questions/206825/tilemap-is-shaking-on-camera-move-in-phaser
+[19] https://www.youtube.com/watch?v=pYErw3Bq3dc
+[20] https://docs.godotengine.org/en/latest/tutorials/2d/particle_systems_2d.html
+
+---
+Answer from Perplexity: pplx.ai/share
