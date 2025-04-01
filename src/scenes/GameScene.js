@@ -73,6 +73,7 @@ import GameStateManager from '../systems/GameStateManager';
 import BatterySystem from '../systems/BatterySystem';
 import JellyfishSystem from '../systems/JellyfishSystem';
 import CurrentSystem from '../systems/CurrentSystem';
+import FlashlightSystem from '../systems/FlashlightSystem';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -551,6 +552,12 @@ export default class GameScene extends Phaser.Scene {
             });
             
             console.log('GameScene initialization complete');
+
+            // Create darkness overlay
+            this.darknessOverlay = this.lightingSystem.overlay;
+            
+            // Initialize flashlight system
+            this.flashlightSystem = new FlashlightSystem(this, this.darknessOverlay);
         } catch (error) {
             console.error('Error in create:', error);
         }
@@ -1616,6 +1623,18 @@ export default class GameScene extends Phaser.Scene {
         if (this.jellyfishSystem) {
             this.jellyfishSystem.update(time, delta);
         }
+
+        // Emit arm data for flashlight system
+        if (this.diverArm && this.player?.sprite) {
+            this.events.emit('armUpdated', {
+                x: this.diverArm.x,
+                y: this.diverArm.y,
+                rotation: this.diverArm.rotation,
+                tipX: this.diverArm.tipX,
+                tipY: this.diverArm.tipY,
+                trueDirection: this.diverArm.trueDirection
+            });
+        }
     }
 
     cleanup() {
@@ -1866,5 +1885,41 @@ export default class GameScene extends Phaser.Scene {
         } catch (error) {
             console.error('Error adjusting background layers:', error);
         }
+    }
+
+    /**
+     * Toggle the flashlight
+     */
+    toggleFlashlight() {
+        if (!this.flashlightSystem) return;
+        
+        // Check battery level first
+        if (this.batterySystem.getBatteryPercentage() <= 0) {
+            console.log('Cannot toggle flashlight - battery depleted');
+            return;
+        }
+        
+        // Toggle flashlight through the new system
+        const isEnabled = this.flashlightSystem.toggle();
+        
+        // Update battery system state
+        if (isEnabled) {
+            this.batterySystem.turnOnFlashlight();
+        } else {
+            this.batterySystem.turnOffFlashlight();
+        }
+    }
+
+    /**
+     * Force flashlight off (used when battery depletes)
+     */
+    forceFlashlightOff() {
+        if (!this.flashlightSystem) return;
+        
+        // Turn off flashlight through the new system
+        this.flashlightSystem.toggle();
+        
+        // Update battery system
+        this.batterySystem.turnOffFlashlight();
     }
 } 

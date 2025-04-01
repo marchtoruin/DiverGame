@@ -235,4 +235,21 @@ export default class BatteryMeter {
             this.container = null;
         }
     }
+    
+    /**
+     * Handle battery depletion
+     */
+    handleBatteryDepleted() {
+        this.isFlashlightActive = false;
+        
+        // Use event system instead of direct manipulation
+        this.scene.events.emit('flashlightStateChanged', false);
+        
+        // Update UI
+        this.updateMeterVisibility();
+        this.updateBatteryDisplay();
+        
+        // Emit event for other systems
+        this.scene.events.emit('batteryDepleted');
+    }
 } 

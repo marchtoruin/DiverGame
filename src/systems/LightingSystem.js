@@ -19,14 +19,14 @@ export default class LightingSystem {
         this.overlay = null;
         
         // Current lighting state
-        this.currentLightLevel = 0; // 0 = default/full brightness
+        this.currentLightLevel = 0;
         this.targetLightLevel = 0;
-        this.currentZoneType = 'default'; // Track the current zone type the player is in
+        this.currentZoneType = 'default';
         
         // Enhanced transition properties
         this.transitionStartTime = 0;
         this.transitionStartValue = 0;
-        this.transitionDuration = 2000; // Default duration in milliseconds
+        this.transitionDuration = 2000;
         
         // Lighting zones from Tiled
         this.lightingZones = [];
@@ -47,29 +47,19 @@ export default class LightingSystem {
         // Point lights collection
         this.pointLights = [];
         
-        // Custom lights collection (pin lights, ambient lights, etc.)
+        // Custom lights collection
         this.customLights = [];
         
         // Light masks for obstacles
         this.lightMask = null;
         
-        // Flashlight properties
-        this.flashlightEnabled = false;
-        this.flashlightMask = null;
-        this.flashlightRotation = 0;
-        
-        // Previous position tracking for boost detection
-        this.prevPlayerX = null;
-        this.prevPlayerY = null;
-        this.prevPlayerTime = 0;
-        
         // Important new values for tracking zones
-        this.shouldResetToDefault = false; // Added flag to control resets to default lighting
-        this.lastNonDefaultZoneType = null; // Track the last non-default zone for persistence
-        this.lastNonDefaultZoneLevel = 0; // Store the level too
-        this.persistentMode = true; // CRITICAL: Always use persistent lighting mode
-        this.inDebugMode = true; // Always log debug info for lighting zones
-        this.forceZonePersistence = true; // Don't allow resets to default
+        this.shouldResetToDefault = false;
+        this.lastNonDefaultZoneType = null;
+        this.lastNonDefaultZoneLevel = 0;
+        this.persistentMode = true;
+        this.inDebugMode = true;
+        this.forceZonePersistence = true;
         
         // Debug graphics and text
         this.debugGraphics = null;
@@ -77,8 +67,6 @@ export default class LightingSystem {
         
         console.log('LightingSystem initialized with PERSISTENT lighting zone handling');
         
-        // Add a debug visualization method call after a delay
-        // to help verify zone creation
         if (this.scene.physics.config.debug) {
             this.scene.time.delayedCall(1000, this.debugZones, [], this);
             this.setupDebugVisuals();
