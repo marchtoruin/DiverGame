@@ -27,6 +27,7 @@ import bgBubble1Img from '../assets/bg_bubble1.png';
 import bgBubble2Img from '../assets/bg_bubble2.png';
 import bgBubble3Img from '../assets/bg_bubble3.png';
 import bulletImg from '../assets/laser_sprites/03.png';
+import laser10Img from '../assets/laser_sprites/10.png'; // Import the specific laser sprite needed
 import airPocket1Img from '../assets/air_pocket1.png';
 import airPocket2Img from '../assets/air_pocket2.png';
 import airPocket3Img from '../assets/air_pocket3.png';
@@ -71,6 +72,7 @@ import LightingSystem from '../systems/LightingSystem';
 import GameStateManager from '../systems/GameStateManager';
 import BatterySystem from '../systems/BatterySystem';
 import JellyfishSystem from '../systems/JellyfishSystem';
+import CurrentSystem from '../systems/CurrentSystem';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -107,6 +109,7 @@ export default class GameScene extends Phaser.Scene {
         this.backgroundSystem = null;
         this.lightingSystem = null;
         this.jellyfishSystem = null;
+        this.currentSystem = null;
         
         // Game state
         this.oxygenLevel = 100;
@@ -153,6 +156,9 @@ export default class GameScene extends Phaser.Scene {
                 console.log('Added level1 data to json cache for AirPocketSystem');
             }
             
+            // Debug logging for available textures
+            console.log('[TEXTURE DEBUG] Available texture keys before loading:', Object.keys(this.textures.list));
+            
             this.load.image('underwater_bg', underwaterBg);
             this.load.image('black_and_blue', blackAndBlueImg);
             this.load.image('rock2', rock2Img);
@@ -182,9 +188,31 @@ export default class GameScene extends Phaser.Scene {
                 this.diverSpritesheetLoaded = true;
             }, this);
             
-            this.load.on('filecomplete', function(key) {
-                console.log('File loaded:', key);
-            });
+            // Add a more detailed file complete handler to log texture details
+            this.load.on('filecomplete', function(key, type, data) {
+                console.log(`[TEXTURE DEBUG] File loaded - key: ${key}, type: ${type}`);
+                if (type === 'image' && this.textures.exists(key)) {
+                    const texture = this.textures.get(key);
+                    console.log(`[TEXTURE DEBUG] Image dimensions for ${key}:`, 
+                        texture.source[0].width, 'x', texture.source[0].height);
+                }
+            }, this);
+            
+            // Add a custom handler for light mask images
+            this.load.on('filecomplete-image', function(key) {
+                if (key && key.includes('.png')) {
+                    // This might be a light mask image with filename extension
+                    const pureFilename = key.replace('.png', '');
+                    console.log(`[LIGHT MASK] Detected possible light mask image with extension: ${key}`);
+                    console.log(`[LIGHT MASK] Creating alias without extension: ${pureFilename}`);
+                    
+                    // Create an alias for the texture without the extension
+                    if (this.textures.exists(key) && !this.textures.exists(pureFilename)) {
+                        this.textures.addKey(pureFilename, key);
+                        console.log(`[LIGHT MASK] Created texture alias: ${key} → ${pureFilename}`);
+                    }
+                }
+            }, this);
             
             // Load the player sprite sheet with exact dimensions (1048px total width, 8 frames at 131x150)
             console.log('Loading player sprite sheet with 131x150 frames');
@@ -215,8 +243,49 @@ export default class GameScene extends Phaser.Scene {
             // Load bullet sprite
             this.load.image('bullet', bulletImg);
             
+            // Load specific laser sprite for pin light
+            // We need '10.png' available as it's referenced in the map
+            try {
+                // Using the directly imported image
+                console.log('[LIGHT] Loading specific laser sprite: 10.png');
+                this.load.image('10.png', laser10Img);
+                this.load.image('10', laser10Img); // Also load with the simplified key directly
+                
+                console.log('[LIGHT] Directly loaded 10.png and 10 textures');
+                
+                // Add texture loading listener 
+                this.load.on('filecomplete-image-10.png', () => {
+                    console.log('[LIGHT] Successfully loaded 10.png texture');
+                });
+                
+                this.load.on('filecomplete-image-10', () => {
+                    console.log('[LIGHT] Successfully loaded 10 texture');
+                });
+            } catch (err) {
+                console.warn('[LIGHT] Error loading laser sprite 10.png:', err);
+            }
+            
             // Load custom flashlight mask image
             this.load.image('flashlight_cone1', flashlightCone1Img);
+            
+            // Explicitly load laser sprites for pin lights with simple naming
+            // This uses laser_sprites from our imports at the top of the file
+            console.log('[LIGHT] Loading laser sprites for pin lights...');
+            try {
+                // Import the image for the laser sprite - use our already imported laser10Img
+                this.load.image('10', laser10Img); // Default fallback
+                
+                // Log a clear message about the available textures for pin lights
+                this.load.on('complete', () => {
+                    console.log('[LIGHT] Available textures for pin lights:', 
+                               Object.keys(this.textures.list).filter(key => 
+                                   !key.startsWith('__') && 
+                                   (key === '10' || key === '10.png' || key.includes('laser'))
+                               ));
+                });
+            } catch (err) {
+                console.warn('[LIGHT] Error loading laser sprites:', err);
+            }
             
             // Load arms sprite for the diver
             this.load.image('arms', armsImg);
@@ -561,11 +630,43 @@ export default class GameScene extends Phaser.Scene {
             this.jellyfishSystem = new JellyfishSystem(this);
             console.log('Jellyfish system created successfully');
             
+            // Initialize current system
+            console.log('Creating current system...');
+            this.currentSystem = new CurrentSystem(this);
+            
+            // Register the current system with entity layer system for processing polylines
+            if (this.entityLayerSystem) {
+                this.currentSystem.registerWithEntitySystem(this.entityLayerSystem);
+            }
+            console.log('Current system created successfully');
+            
             // Initialize lighting system
             this.lightingSystem = new LightingSystem(this);
-            
+            this.lightingSystem.player = this.player; // Direct reference to player
+            console.log('[LIGHT] Setting up lighting system with player reference');
+
             // Set the custom flashlight mask
             this.lightingSystem.setCustomFlashlightMask('flashlight_cone1');
+
+            // Create overlay after loading is complete
+            this.load.once('complete', () => {
+                console.log('[LIGHT] Load complete, creating lighting overlay');
+                this.lightingSystem.createOverlay();
+                
+                // Directly apply lighting to player and obstacles
+                if (this.player && this.player.sprite) {
+                    console.log('[LIGHT] Applying lighting to player and obstacles');
+                    this.lightingSystem.applyLightingToPlayer();
+                    this.lightingSystem.applyLightingToObstacles();
+                }
+            });
+
+            // Make sure lighting is applied after player is fully initialized
+            this.events.once('player-ready', () => {
+                console.log('[LIGHT] Player ready, ensuring lighting is applied');
+                this.lightingSystem.player = this.player;
+                this.lightingSystem.applyLightingToPlayer();
+            });
             
             // Initialize animation system
             this.animationSystem = new AnimationSystem(this);
@@ -850,6 +951,24 @@ export default class GameScene extends Phaser.Scene {
                 console.error('No tilesets were added to the map');
             }
 
+            // After map is created, initialize current system with it
+            if (this.currentSystem) {
+                console.log('Initializing current system with map and player');
+                
+                // Ensure debug mode is enabled before processing
+                this.currentSystem.setDebugMode(true);
+                
+                // Call init method to process both current and current_effects layers
+                this.currentSystem.init(this.player, map);
+                
+                // Ensure player is connected
+                if (this.player) {
+                    this.currentSystem.setPlayer(this.player);
+                }
+                
+                console.log('Current system initialized with map data');
+            }
+
             // After map is created and all the setup has been done:
             if (this.lightingSystem) {
                 console.log('Initializing lighting system with map');
@@ -857,11 +976,24 @@ export default class GameScene extends Phaser.Scene {
                 // Create a lighting overlay sized to the camera
                 this.lightingSystem.createOverlay();
                 
-                // Process Lighting layer from the Tiled map
+                // Process lighting layer from the Tiled map
                 this.lightingSystem.processLightingZones(map);
                 
                 // Process Light objects from the Tiled map (for point lights)
                 this.lightingSystem.processLightObjects(map);
+                
+                // Check if the load is in progress and wait for completion if needed
+                if (this.load.isLoading()) {
+                    console.log('Waiting for custom light mask images to load...');
+                    this.load.once('complete', () => {
+                        console.log('Custom light mask images loaded, processing custom lights');
+                        // Process the custom 'lights' layer for pin_light objects after images are loaded
+                        this.lightingSystem.processCustomLights(map);
+                    });
+                } else {
+                    // Process the custom 'lights' layer for pin_light objects immediately
+                    this.lightingSystem.processCustomLights(map);
+                }
                 
                 // Give the lighting system access to the map
                 this.map = map;
@@ -1112,6 +1244,12 @@ export default class GameScene extends Phaser.Scene {
                     this.lightingSystem.setPlayer(this.player);
                 }
                 
+                // Connect to current system
+                if (this.currentSystem) {
+                    console.log('Connecting player to current system');
+                    this.currentSystem.setPlayer(this.player);
+                }
+                
                 console.log('Player setup complete');
             } else {
                 console.error('Failed to create player sprite');
@@ -1173,9 +1311,40 @@ export default class GameScene extends Phaser.Scene {
                     // Enable collisions on the obstacles layer
                     obstaclesLayer.setCollisionByExclusion([-1]);
                     
-                    // Add collider between player and obstacles
-                    this.physics.add.collider(this.player.sprite, obstaclesLayer);
-                    console.log('Player-obstacle collisions set up');
+                    // Add collider between player and obstacles with enhanced separation
+                    const playerCollider = this.physics.add.collider(
+                        this.player.sprite, 
+                        obstaclesLayer,
+                        null, // No collision callback needed
+                        null,
+                        this
+                    );
+                    
+                    // Increase the separation factor for the player collider to make it "stronger"
+                    // This prevents the player from pushing through walls
+                    playerCollider.overlapOnly = false;
+                    playerCollider.collideCallback = null;
+                    playerCollider.processCallback = null;
+                    playerCollider.callbackContext = this;
+                    playerCollider.separate = true; // Force separation 
+                    
+                    console.log('Player-obstacle collisions set up with enhanced separation');
+                    
+                    // Ensure player's body has appropriate properties to prevent wall pushing
+                    if (this.player.sprite.body) {
+                        // Make sure body is not pushed through walls easily
+                        this.player.sprite.body.pushable = false;
+                        
+                        // Store the original body size for reference
+                        this.player.originalBodySize = {
+                            width: this.player.sprite.body.width,
+                            height: this.player.sprite.body.height,
+                            offsetX: this.player.sprite.body.offset.x,
+                            offsetY: this.player.sprite.body.offset.y
+                        };
+                        
+                        console.log('Player physics body configured to prevent wall pushing');
+                    }
                     
                     // Add bullet-wall collisions
                     if (this.bulletSystem) {
@@ -1189,6 +1358,39 @@ export default class GameScene extends Phaser.Scene {
                             }
                         );
                         console.log('Bullet-obstacle collisions set up');
+                    }
+                    
+                    // Add collider between enemies and obstacles if the enemy system exists
+                    if (this.enemySystem && this.enemySystem.enemies) {
+                        // Create and configure the enemy-obstacles collider with strong separation
+                        const enemyCollider = this.physics.add.collider(
+                            this.enemySystem.enemies,
+                            obstaclesLayer,
+                            null, // No collision callback needed
+                            null,
+                            this
+                        );
+                        
+                        // Configure the enemy collider to ensure strong separation
+                        enemyCollider.overlapOnly = false;
+                        enemyCollider.separate = true;
+                        
+                        console.log('Enemy-obstacle collisions set up');
+                        
+                        // Also configure enemy bodies if needed through a delayed call
+                        // This ensures all enemies are processed, even those created later
+                        this.time.delayedCall(100, () => {
+                            this.enemySystem.enemies.getChildren().forEach(enemy => {
+                                if (enemy.body) {
+                                    // Configure enemy body to prevent wall pushing
+                                    enemy.body.pushable = false;
+                                    
+                                    // Optionally increase mass to make collision stronger
+                                    enemy.body.mass = 4;
+                                }
+                            });
+                            console.log('Enemy physics bodies configured to prevent wall pushing');
+                        });
                     }
                 }
             }
@@ -1354,6 +1556,9 @@ export default class GameScene extends Phaser.Scene {
         this.airPocketSystem?.update?.(time, delta);
         this.collisionSystem?.update?.(time, delta);
         
+        // Update current system to apply forces to player
+        this.currentSystem?.update?.(time, delta);
+        
         // Update visual and effect systems
         this.ambientBubbleSystem?.update?.(time, delta);
         this.bulletSystem?.update?.(time, delta);
@@ -1430,7 +1635,8 @@ export default class GameScene extends Phaser.Scene {
                 { system: this.player, name: 'Player' },
                 { system: this.oxygenMeter, name: 'OxygenMeter' },
                 { system: this.healthSystem, name: 'HealthSystem' },
-                { system: this.gameSceneCamera, name: 'GameSceneCamera' }
+                { system: this.gameSceneCamera, name: 'GameSceneCamera' },
+                { system: this.currentSystem, name: 'CurrentSystem' }
             ];
             
             // Clean up each system
@@ -1486,6 +1692,7 @@ export default class GameScene extends Phaser.Scene {
                 { system: this.enemySystem, name: 'EnemySystem' },
                 { system: this.bulletSystem, name: 'BulletSystem' },
                 { system: this.jellyfishSystem, name: 'JellyfishSystem' },
+                { system: this.currentSystem, name: 'CurrentSystem' },
                 { system: this.audioSystem, name: 'AudioSystem' }
             ];
             

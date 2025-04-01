@@ -40,15 +40,13 @@ export default class AirPocket {
             // Create sprite
             this.sprite = this.scene.physics.add.sprite(this.x, this.y, textureName);
             this.sprite.airPocketInstance = this; // Reference back to this instance
-            this.sprite.setScale(0.5); // Smaller visual appearance
+            this.sprite.setScale(0.2); // Much smaller visual appearance
+            this.sprite.setDepth(20); // Set depth for proper layering
             
-            // Make physics body larger than visual sprite for better collision detection
-            // This helps prevent high-speed tunneling
+            // Make physics body slightly larger than visual sprite for better collision
             if (this.sprite.body) {
-                // Make the physics body significantly larger than the visual sprite
-                // This gives a much bigger target for high-speed players to hit
-                const bodyWidth = this.sprite.width * 2.0;  // Double size
-                const bodyHeight = this.sprite.height * 2.0; // Double size
+                const bodyWidth = this.sprite.width * 1.2;  // Only 20% larger
+                const bodyHeight = this.sprite.height * 1.2; // Only 20% larger
                 
                 this.sprite.body.setSize(bodyWidth, bodyHeight);
                 this.sprite.body.setOffset(
@@ -65,8 +63,41 @@ export default class AirPocket {
                 // Add slight bounce for visual effect
                 this.sprite.body.bounce.set(0.4);
                 
-                // Give a slight upward velocity to make it float
-                this.sprite.body.velocity.y = -75;
+                // Give a stronger upward velocity to make it float more noticeably
+                this.sprite.body.velocity.y = -100;
+            }
+            
+            // Add particle emitter for bubbles
+            if (this.scene.add.particles && this.scene.textures.exists('bubble')) {
+                this.particles = this.scene.add.particles(0, 0, 'bubble', {
+                    follow: this.sprite,
+                    followOffset: { x: 0, y: 10 }, // Emit from slightly below
+                    lifespan: 2000,
+                    gravityY: -50,
+                    speed: { min: 20, max: 40 },
+                    scale: { start: 0.2, end: 0.1 },
+                    alpha: { start: 0.6, end: 0 },
+                    angle: { min: 265, max: 275 },
+                    frequency: 100,
+                    depth: 19, // Set below air pocket depth
+                    emitZone: {
+                        type: 'random',
+                        source: new Phaser.Geom.Circle(0, 0, 15)
+                    }
+                });
+                
+                // Add a subtle pulsing effect
+                this.scene.tweens.add({
+                    targets: this.sprite,
+                    scale: { from: 0.2, to: 0.22 },
+                    alpha: { from: 0.9, to: 1 },
+                    duration: 1500,
+                    yoyo: true,
+                    repeat: -1,
+                    ease: 'Sine.easeInOut'
+                });
+            } else {
+                console.warn('[AIR] Bubble texture not found for particle effects');
             }
             
             return this.sprite;

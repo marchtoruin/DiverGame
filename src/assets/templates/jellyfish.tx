@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<template>
+ <object name="jellyfish">
+  <properties>
+   <property name="charge" type="int" value="100"/>
+   <property name="timer" type="int" value="25"/>
+   <property name="type" value="jellyfish"/>
+  </properties>
+  <point/>
+ </object>
+</template>

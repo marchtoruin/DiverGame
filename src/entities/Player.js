@@ -67,19 +67,40 @@ export default class Player extends Phaser.GameObjects.Container {
                 body.setFriction(PLAYER.FRICTION, PLAYER.FRICTION);
                 body.setMaxVelocity(PLAYER.MAX_VELOCITY, PLAYER.MAX_VELOCITY);
                 
-                // Set proper hitbox size and offset - keep the same physics body size for collision consistency
-                body.setSize(80, 120, true);
-                body.setOffset(5, 5);
+                // Enhanced physics settings to prevent wall pushing
+                body.pushable = false;    // Prevent being pushed by other objects
+                body.setImmovable(false); // Allow movement but with rigid collision
+                body.mass = 5;            // Increase mass for better collision separation
+                body.bounce.set(0.1);     // Low bounce to prevent wall tunneling
                 
-                // Enable collision detection and make player immovable
+                // Set proper hitbox size - use a slightly smaller hitbox than visuals
+                // to prevent getting caught on corners while still having solid collisions
+                body.setSize(70, 100, true);
+                body.setOffset(28, 25);
+                
+                // CRITICAL: Save original body size and offset for collision system
+                this.originalBodySize = {
+                    width: body.width,
+                    height: body.height,
+                    offsetX: body.offset.x,
+                    offsetY: body.offset.y
+                };
+                
+                // Store maximum allowed momentum to prevent excessive force build-up
+                this.maxMomentum = PLAYER.MAX_VELOCITY * 1.5;
+                
+                // Enable collision detection
                 body.enable = true;
-                body.setImmovable(true);  // Make player immovable for better collision detection
-                body.pushable = false;    // Prevent being pushed by enemies
+                
+                console.log('Player physics body configured with enhanced collision settings');
             }
             
             // Set up sprite properties
             this.sprite.setOrigin(0.5, 0.5);
             this.sprite.setDepth(10);
+            
+            // Register update event to manage velocity and prevent wall pushing
+            this.scene.events.on('update', this.limitExcessiveVelocity, this);
             
             return this.sprite;
         } catch (error) {
@@ -92,9 +113,19 @@ export default class Player extends Phaser.GameObjects.Container {
             );
             
             if (this.sprite && this.sprite.body) {
-                this.sprite.body.setSize(80, 120, true);
-                this.sprite.body.setOffset(5, 5);
+                this.sprite.body.setSize(70, 100, true);
+                this.sprite.body.setOffset(28, 25);
                 this.sprite.body.enable = true;
+                this.sprite.body.pushable = false;
+                this.sprite.body.mass = 5;
+                
+                // Store original body size even in fallback
+                this.originalBodySize = {
+                    width: this.sprite.body.width,
+                    height: this.sprite.body.height,
+                    offsetX: this.sprite.body.offset.x,
+                    offsetY: this.sprite.body.offset.y
+                };
             }
             
             return this.sprite;
@@ -657,16 +688,36 @@ export default class Player extends Phaser.GameObjects.Container {
         return this.oxygen;
     }
 
+    /**
+     * Clean up resources when the player is destroyed
+     */
     destroy() {
-        if (this.maskBubbles) {
-            this.maskBubbles.destroy();
-            this.maskBubbles = null;
+        // Remove all event listeners
+        this.removeAllListeners();
+        
+        // Remove scene event listeners
+        if (this.scene && this.scene.events) {
+            this.scene.events.off('update', this.limitExcessiveVelocity, this);
         }
         
-        if (this.helmetBubbles) {
-            this.helmetBubbles.destroy();
-            this.helmetBubbles = null;
+        // Destroy the sprite if it exists
+        if (this.sprite) {
+            this.sprite.destroy();
+            this.sprite = null;
         }
+        
+        // Destroy mask bubbles if they exist
+        if (this.maskBubbles) {
+            this.maskBubbles.forEach(bubble => {
+                if (bubble && bubble.destroy) {
+                    bubble.destroy();
+                }
+            });
+            this.maskBubbles = [];
+        }
+        
+        // Call the parent class destroy method
+        super.destroy();
     }
 
     /**
@@ -878,5 +929,42 @@ export default class Player extends Phaser.GameObjects.Container {
         }
         
         return this.treadStamina.effectiveness;
+    }
+
+    /**
+     * Limit player velocity to prevent wall pushing issues
+     * @param {number} time - Current game time
+     * @param {number} delta - Time since last update
+     */
+    limitExcessiveVelocity(time, delta) {
+        if (!this.sprite || !this.sprite.body) return;
+        
+        const body = this.sprite.body;
+        const vx = body.velocity.x;
+        const vy = body.velocity.y;
+        
+        // Only apply velocity limiting when not boosting
+        if (!this.boostActive) {
+            // If velocity exceeds our defined maximum momentum in any direction, cap it
+            if (Math.abs(vx) > this.maxMomentum) {
+                body.velocity.x = Math.sign(vx) * this.maxMomentum;
+            }
+            
+            if (Math.abs(vy) > this.maxMomentum) {
+                body.velocity.y = Math.sign(vy) * this.maxMomentum;
+            }
+            
+            // Check if player might be pushing against a wall
+            // If there's high acceleration but little movement, player might be against a wall
+            if (body.blocked.left || body.blocked.right) {
+                // Reduce horizontal velocity more aggressively when colliding with walls
+                body.velocity.x *= 0.7;
+            }
+            
+            if (body.blocked.up || body.blocked.down) {
+                // Reduce vertical velocity more aggressively when colliding with walls
+                body.velocity.y *= 0.7;
+            }
+        }
     }
 } 

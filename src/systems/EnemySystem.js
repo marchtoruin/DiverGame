@@ -10,6 +10,21 @@ export default class EnemySystem {
             runChildUpdate: true
         });
         
+        // Set up custom create callback for the group to configure physics for each enemy
+        this.enemies.createCallback = (enemy) => {
+            if (enemy.body) {
+                // Configure physics body properties to prevent wall pushing
+                enemy.body.pushable = false;
+                enemy.body.mass = 4; // Higher mass helps with collision resolution
+                
+                // These settings make the enemy respect solid obstacles
+                enemy.body.setCollideWorldBounds(true);
+                enemy.body.setBounce(0.2); // Small bounce when hitting obstacles
+                
+                // console.log(`[ENEMY] Physics configured for new enemy at (${enemy.x}, ${enemy.y})`); // Commented out
+            }
+        };
+        
         // Spawn settings
         this.maxEnemies = 10;
         this.spawnInterval = 2000; // Spawn every 2 seconds
@@ -35,6 +50,9 @@ export default class EnemySystem {
         // Initialize with hardcoded spawn points
         this.initSpawnPoints(this.hardcodedSpawnPoints);
         
+        // Register an update event to ensure enemies respect collision settings
+        scene.events.on('update', this.postUpdateEnemies, this);
+        
         console.log('EnemySystem initialization complete');
         
         // Start spawning immediately
@@ -44,13 +62,13 @@ export default class EnemySystem {
     isPositionValid(x, y) {
         // First check if the map and tilemapSystem are available
         if (!this.scene.tilemapSystem) {
-            console.log("No tilemapSystem found - allowing spawn position");
+            // console.log("No tilemapSystem found - allowing spawn position"); // Commented out
             return true;
         }
         
         // Check if tilemap is initialized
         if (!this.scene.tilemapSystem.map) {
-            console.log("Map not initialized - allowing spawn position");
+            // console.log("Map not initialized - allowing spawn position"); // Commented out
             return true;
         }
         
@@ -63,37 +81,40 @@ export default class EnemySystem {
         const buffer = 100; // Allow spawning within 100 pixels outside the map
         
         if (x < -buffer || x > mapWidth + buffer || y < -buffer || y > mapHeight + buffer) {
-            console.log(`Position (${x}, ${y}) too far outside map bounds`);
+            // console.log(`Position (${x}, ${y}) too far outside map bounds`); // Commented out
             return false;
         }
         
         // Skip obstacle check for spawn positions that are outside the map
         // This allows enemies to spawn from the edges
         if (x < 0 || x > mapWidth || y < 0 || y > mapHeight) {
-            console.log(`Position (${x}, ${y}) is at map edge - valid spawn point`);
+            // console.log(`Position (${x}, ${y}) is at map edge - valid spawn point`); // Commented out
             return true;
         }
         
         // Only check for obstacles if the position is inside the map
         if (this.scene.tilemapSystem.isPositionBlocked) {
             const isBlocked = this.scene.tilemapSystem.isPositionBlocked(x, y);
+            /*
             if (isBlocked) {
                 console.log(`Position (${x}, ${y}) blocked by obstacle`);
             }
+            */
             return !isBlocked;
         }
         
         // If we can't check for obstacles, allow the position
-        console.log(`Position (${x}, ${y}) valid (no obstacle check available)`);
+        // console.log(`Position (${x}, ${y}) valid (no obstacle check available)`); // Commented out
         return true;
     }
     
     updateMapBounds() {
-        console.log('Updating map bounds...');
+        // console.log('Updating map bounds...'); // Commented out
         
         // Try to get bounds from tilemap first
         if (this.scene.tilemapSystem && this.scene.tilemapSystem.map) {
             const map = this.scene.tilemapSystem.map;
+            /*
             console.log('TilemapSystem found with map:', {
                 widthInPixels: map.widthInPixels,
                 heightInPixels: map.heightInPixels,
@@ -102,21 +123,22 @@ export default class EnemySystem {
                 tileWidth: map.tileWidth,
                 tileHeight: map.tileHeight
             });
+            */
             
             this.mapBounds = {
                 width: map.widthInPixels,
                 height: map.heightInPixels
             };
-            console.log('Set map bounds from tilemap:', this.mapBounds);
+            // console.log('Set map bounds from tilemap:', this.mapBounds); // Commented out
         }
         // Fallback to camera bounds
         else if (this.scene.cameras && this.scene.cameras.main) {
-            console.log('No tilemap found, using camera bounds');
+            // console.log('No tilemap found, using camera bounds'); // Commented out
             this.mapBounds = {
                 width: this.scene.cameras.main.width,
                 height: this.scene.cameras.main.height
             };
-            console.log('Set map bounds from camera:', this.mapBounds);
+            // console.log('Set map bounds from camera:', this.mapBounds); // Commented out
         }
         // Last resort - use default values
         else {
@@ -125,21 +147,21 @@ export default class EnemySystem {
                 width: 800,
                 height: 600
             };
-            console.log('Set default map bounds:', this.mapBounds);
+            // console.log('Set default map bounds:', this.mapBounds); // Commented out
         }
     }
     
     spawnEnemy() {
-        console.log('SpawnEnemy called. Current enemy count:', this.enemies.getLength(), 'Max:', this.maxEnemies);
+        // console.log('SpawnEnemy called. Current enemy count:', this.enemies.getLength(), 'Max:', this.maxEnemies); // Commented out
         
         if (this.enemies.getLength() >= this.maxEnemies) {
-            console.log('Max enemies reached, skipping spawn');
+            // console.log('Max enemies reached, skipping spawn'); // Commented out
             return;
         }
         
         // Update map bounds before spawning
         this.updateMapBounds();
-        console.log('Map bounds:', this.mapBounds);
+        // console.log('Map bounds:', this.mapBounds); // Commented out
         
         // Try to find a valid spawn position
         let validPosition = false;
@@ -171,7 +193,7 @@ export default class EnemySystem {
                     break;
             }
             
-            console.log(`Attempt ${attempts + 1}: Trying position (${x}, ${y})`);
+            // console.log(`Attempt ${attempts + 1}: Trying position (${x}, ${y})`); // Commented out
             
             // Check if position is valid (not inside an obstacle)
             validPosition = this.isPositionValid(x, y);
@@ -201,24 +223,29 @@ export default class EnemySystem {
         // Update spawn timer
         this.spawnTimer += delta;
         
-        // Only log every second to reduce spam
+        // Comment out frequent logs to reduce console spam
+        /*
         if (Math.floor(this.spawnTimer / 1000) !== Math.floor((this.spawnTimer - delta) / 1000)) {
             console.log(`Enemy system active - Timer: ${Math.floor(this.spawnTimer)}/${this.spawnInterval}ms`);
         }
+        */
         
         if (this.spawnTimer >= this.spawnInterval) {
-            console.log('Spawn interval reached, attempting to spawn enemy...');
+            // console.log('Spawn interval reached, attempting to spawn enemy...'); // Commented out
             this.spawnTimer = 0;
             this.spawnEnemy();
         }
         
         // Update existing enemies
         const enemies = this.enemies.getChildren();
+        
+        /* Comment out these frequent logs
         if (enemies.length === 0) {
             console.log('No active enemies, waiting for spawn...');
         } else {
             console.log(`Managing ${enemies.length} active enemies`);
         }
+        */
         
         // Clean up dead enemies
         enemies.forEach(enemy => {
@@ -229,7 +256,70 @@ export default class EnemySystem {
         });
     }
     
+    /**
+     * Post-update method to ensure enemies have proper physics configuration
+     * Called each frame to maintain enemy collision integrity
+     * @param {number} time - Current game time
+     * @param {number} delta - Time since last update
+     */
+    postUpdateEnemies(time, delta) {
+        // Check for newly created enemies that might need physics configuration
+        // Only run the check once per second to avoid performance issues
+        if (time % 1000 < 16) { // Approximately once per second
+            this.enemies.getChildren().forEach(enemy => {
+                if (enemy && enemy.body && !enemy.physicsConfigured) {
+                    // Configure physics properties for this enemy
+                    enemy.body.pushable = false;
+                    enemy.body.mass = 4;
+                    enemy.body.setCollideWorldBounds(true);
+                    enemy.body.setBounce(0.2);
+                    
+                    // Mark as configured to avoid repeated setup
+                    enemy.physicsConfigured = true;
+                    
+                    // console.log(`Configured physics for enemy at (${enemy.x}, ${enemy.y})`); // Commented out
+                }
+                
+                // Check for any enemies that are stuck in walls
+                // If an enemy's velocity is very low for multiple frames, it might be stuck
+                if (enemy && enemy.body) {
+                    const vel = Math.abs(enemy.body.velocity.x) + Math.abs(enemy.body.velocity.y);
+                    
+                    // Track low velocity frames
+                    if (!enemy.lowVelocityFrames) enemy.lowVelocityFrames = 0;
+                    
+                    if (vel < 5) {
+                        enemy.lowVelocityFrames++;
+                        
+                        // If an enemy is stuck for too long, try to free it
+                        if (enemy.lowVelocityFrames > 60) { // Stuck for ~1 second
+                            // Reset stuck counter
+                            enemy.lowVelocityFrames = 0;
+                            
+                            // Small random velocity nudge to unstick the enemy
+                            const angle = Math.random() * Math.PI * 2;
+                            const force = 100;
+                            enemy.body.velocity.x += Math.cos(angle) * force;
+                            enemy.body.velocity.y += Math.sin(angle) * force;
+                            
+                            // Only log when we actually unstick an enemy
+                            // console.log(`Unsticking enemy that appears to be stuck at (${enemy.x}, ${enemy.y})`); // Commented out
+                        }
+                    } else {
+                        // Reset counter if moving normally
+                        enemy.lowVelocityFrames = 0;
+                    }
+                }
+            });
+        }
+    }
+    
     destroy() {
+        // Remove the update event listener
+        if (this.scene && this.scene.events) {
+            this.scene.events.off('update', this.postUpdateEnemies, this);
+        }
+        
         this.enemies.getChildren().forEach(enemy => enemy.destroy());
         this.enemies.clear(true, true);
     }
@@ -347,7 +437,7 @@ export default class EnemySystem {
             return;
         }
         
-        console.log('Checking for air pocket markers at enemy spawn positions');
+        // console.log('Checking for air pocket markers at enemy spawn positions'); // Commented out
         
         // Get the spawn locations
         const enemyPositions = this.spawnPoints.map(p => ({ x: p.x, y: p.y }));
