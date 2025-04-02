@@ -21,16 +21,20 @@ export default class BulletSystem {
         // Firing properties
         this.fireRate = 150; // Time between shots in ms
         this.lastFireTime = 0;
+        this.enabled = true;
         this.isFiring = false;
         
         // Oxygen cost per shot
-        this.oxygenCostPerShot = 0.7; // Reduced from 2 to make shooting more sustainable
+        this.oxygenCostPerShot = 0.7;
         
         // Reference to the lighting system (will be set in init)
         this.lightingSystem = null;
-        
-        // Set up input handling
+
+        // Set up input handling for automatic fire
         this.setupInput();
+
+        // Listen for weapon system events
+        this.scene.events.on('weaponChanged', this.onWeaponChanged, this);
     }
     
     /**
@@ -42,11 +46,11 @@ export default class BulletSystem {
             this.lightingSystem = this.scene.lightingSystem;
         }
     }
-    
+
     setupInput() {
-        // Set up mouse input for firing
+        // Set up mouse input for automatic firing
         this.scene.input.on('pointerdown', (pointer) => {
-            if (pointer.leftButtonDown()) {
+            if (pointer.leftButtonDown() && this.enabled) {
                 this.isFiring = true;
             }
         });
@@ -58,59 +62,67 @@ export default class BulletSystem {
         });
     }
 
-    /**
-     * Update bullet system
-     * @param {number} time - Current game time
-     * @param {number} delta - Time since last update
-     */
+    onWeaponChanged(weaponState) {
+        // Only enable for default weapon
+        this.enabled = weaponState.current === 'default';
+        // Reset firing state when disabled
+        if (!this.enabled) {
+            this.isFiring = false;
+        }
+    }
+
     update(time, delta) {
+        // Only handle automatic firing for default weapon
+        if (!this.enabled) return;
+
         // Handle firing logic
         if (this.isFiring || this.scene.input.activePointer.isDown) {
             // Check if enough time has passed since last shot
             if (time - this.lastFireTime >= this.fireRate) {
-                // Only fire if we have a player reference and diver arm
-                if (this.scene.player?.sprite && this.scene.diverArm) {
-                    // Get the arm tip position
-                    const diverArm = this.scene.diverArm;
-                    
-                    // Get bullet origin position
-                    let bulletX, bulletY;
-                    
-                    // Check if we have pre-calculated tip position
-                    if (diverArm.tipX !== undefined && diverArm.tipY !== undefined) {
-                        // Use the pre-calculated tip position directly
-                        bulletX = diverArm.tipX;
-                        bulletY = diverArm.tipY;
-                    } else {
-                        // Fallback calculation if tip position is not available
-                        const armLength = 70;
-                        // Use trueDirection for tip calculation
-                        const trueDirection = diverArm.trueDirection || 0;
-                        bulletX = diverArm.x + Math.cos(trueDirection) * armLength;
-                        bulletY = diverArm.y + Math.sin(trueDirection) * armLength;
-                    }
-                    
-                    // Use the raw angle directly for bullet direction
-                    const trueDirection = diverArm.trueDirection || 0;
-                    
-                    // Calculate velocity components directly from true direction
-                    const dirX = Math.cos(trueDirection);
-                    const dirY = Math.sin(trueDirection);
-                    
-                    console.log(`[BULLET] Firing using trueDirection ${Phaser.Math.RadToDeg(trueDirection).toFixed(1)}°, ` +
-                               `direction: (${dirX.toFixed(2)}, ${dirY.toFixed(2)}), ` +
-                               `from: (${bulletX.toFixed(0)}, ${bulletY.toFixed(0)})`);
-                    
-                    // Fire the bullet with the raw direction components
-                    this.fireBullet(bulletX, bulletY, { x: dirX, y: dirY });
-                    
-                    // Update last fire time
-                    this.lastFireTime = time;
-                }
+                this.tryShoot();
             }
         }
     }
-    
+
+    tryShoot() {
+        // Only fire if we have a player reference and diver arm
+        if (!this.enabled || !this.scene.player?.sprite || !this.scene.diverArm) return;
+
+        const diverArm = this.scene.diverArm;
+        
+        // Get bullet origin position
+        let bulletX, bulletY;
+        
+        // Check if we have pre-calculated tip position
+        if (diverArm.tipX !== undefined && diverArm.tipY !== undefined) {
+            bulletX = diverArm.tipX;
+            bulletY = diverArm.tipY;
+        } else {
+            // Fallback calculation if tip position is not available
+            const armLength = 70;
+            const trueDirection = diverArm.trueDirection || 0;
+            bulletX = diverArm.x + Math.cos(trueDirection) * armLength;
+            bulletY = diverArm.y + Math.sin(trueDirection) * armLength;
+        }
+        
+        // Use the raw angle directly for bullet direction
+        const trueDirection = diverArm.trueDirection || 0;
+        
+        // Calculate velocity components directly from true direction
+        const dirX = Math.cos(trueDirection);
+        const dirY = Math.sin(trueDirection);
+        
+        console.log(`[BULLET] Firing using trueDirection ${Phaser.Math.RadToDeg(trueDirection).toFixed(1)}°, ` +
+                   `direction: (${dirX.toFixed(2)}, ${dirY.toFixed(2)}), ` +
+                   `from: (${bulletX.toFixed(0)}, ${bulletY.toFixed(0)})`);
+        
+        // Fire the bullet with the raw direction components
+        this.fireBullet(bulletX, bulletY, { x: dirX, y: dirY });
+        
+        // Update last fire time
+        this.lastFireTime = this.scene.time.now;
+    }
+
     /**
      * Fire a bullet from the player
      * @param {number} x - X position of the bullet origin
@@ -119,8 +131,8 @@ export default class BulletSystem {
      */
     fireBullet(x, y, direction) {
         // Check if player has enough oxygen to fire
-        if (this.scene.player && this.scene.player.oxygen < this.oxygenCostPerShot) {
-            return; // Can't fire if not enough oxygen
+        if (!this.enabled || (this.scene.player && this.scene.player.oxygen < this.oxygenCostPerShot)) {
+            return;
         }
 
         let bullet = this.bullets.getFirstDead(true);
@@ -128,22 +140,11 @@ export default class BulletSystem {
         if (bullet) {
             // If direction is a vector object with x and y properties, use it directly
             if (typeof direction === 'object' && direction.x !== undefined && direction.y !== undefined) {
-                // Use the provided origin point without offset
                 bullet.fire(x, y, direction);
             } else {
                 // Legacy support for simple left/right direction
-                // Different offsets based on player direction
-                let bulletX = x;
-                let bulletY = y;
-                
-                if (direction > 0) { // Facing right
-                    bulletX = x + 50;
-                    bulletY = y - 40;
-                } else { // Facing left
-                    bulletX = x - 50;
-                    bulletY = y - 40;
-                }
-                
+                let bulletX = direction > 0 ? x + 50 : x - 50;
+                let bulletY = y - 40;
                 bullet.fire(bulletX, bulletY, direction);
             }
             
@@ -195,7 +196,8 @@ export default class BulletSystem {
      * Clean up resources
      */
     destroy() {
-        // Remove input listeners
+        // Remove event listeners
+        this.scene.events.off('weaponChanged', this.onWeaponChanged, this);
         this.scene.input.off('pointerdown');
         this.scene.input.off('pointerup');
         

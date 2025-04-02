@@ -43,6 +43,9 @@ import jellyFishImg from '../assets/jelly_fish.png'; // Import jellyfish sprite 
 import jellyChargeImg from '../assets/jelly_charge.png'; // Import jellyfish battery charge pickup sprite with underscore
 import armsImg from '../assets/arms.png';
 import armsLeftImg from '../assets/arms_left.png'; // Import left-facing arm sprite
+import dangerCurrentsSmallImg from '../assets/danger_currents_small.png'; // Import currents tileset
+import harpoonArmsRightImg from '../assets/harpoon_arms_right.png';
+import harpoonArmsLeftImg from '../assets/harpoon_arms_left.png';
 
 // Import systems
 import AnimationSystem from '../systems/AnimationSystem';
@@ -74,6 +77,9 @@ import BatterySystem from '../systems/BatterySystem';
 import JellyfishSystem from '../systems/JellyfishSystem';
 import CurrentSystem from '../systems/CurrentSystem';
 import FlashlightSystem from '../systems/FlashlightSystem';
+import WeaponSystem from '../systems/WeaponSystem';
+import HarpoonSystem from '../systems/HarpoonSystem';
+import DefaultArmSystem from '../systems/DefaultArmSystem';
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -111,6 +117,7 @@ export default class GameScene extends Phaser.Scene {
         this.lightingSystem = null;
         this.jellyfishSystem = null;
         this.currentSystem = null;
+        this.defaultArmSystem = null; // Add the new system
         
         // Game state
         this.oxygenLevel = 100;
@@ -161,6 +168,74 @@ export default class GameScene extends Phaser.Scene {
             console.log('[TEXTURE DEBUG] Available texture keys before loading:', Object.keys(this.textures.list));
             
             this.load.image('underwater_bg', underwaterBg);
+            this.load.image('black_and_blue', blackAndBlueImg);
+            this.load.image('rock2', rock2Img);
+            this.load.image('rock3', rock3Img);
+            this.load.image('player', diverImg);
+            this.load.image('bubble', bubbleImg);
+            this.load.image('bg_bubble1', bgBubble1Img);
+            this.load.image('bg_bubble2', bgBubble2Img);
+            this.load.image('bg_bubble3', bgBubble3Img);
+            this.load.image('bullet', bulletImg);
+            this.load.image('air_pocket1', airPocket1Img);
+            this.load.image('air_pocket2', airPocket2Img);
+            this.load.image('air_pocket3', airPocket3Img);
+            this.load.image('heart', heartImg);
+            this.load.image('badFish', badFishImg);
+            this.load.image('seaweed', seaweedImg);
+            this.load.image('new_idle_swim', new_idle_swimImg);
+            this.load.image('battery', batteryImg);
+            this.load.image('jelly_fish', jellyFishImg);
+            this.load.image('jelly_charge', jellyChargeImg);
+            
+            // Additional check for danger_currents_small image loading
+            this.load.on('filecomplete-image-danger_currents_small', () => {
+                console.log('✅✅✅ danger_currents_small image loaded from direct import');
+            });
+            
+            // General complete event to verify all textures
+            this.load.on('complete', () => {
+                console.log('All assets loaded');
+                console.log('Available textures:', Object.keys(this.textures.list));
+                
+                // Check if danger_currents_small has loaded
+                if (this.textures.exists('danger_currents_small')) {
+                    console.log('✅ danger_currents_small image found in texture cache');
+                    const frame = this.textures.get('danger_currents_small').getSourceImage();
+                    console.log('Image dimensions:', frame.width, 'x', frame.height);
+                } else {
+                    console.error('❌ danger_currents_small image NOT FOUND in texture cache');
+                }
+            });
+            
+            // Debug textures for pin lights
+            this.load.on('filecomplete-image-10.png', () => {
+                console.log('[LIGHT] Successfully loaded 10.png texture');
+            });
+            
+            this.load.on('filecomplete-image-10', () => {
+                console.log('[LIGHT] Successfully loaded 10 texture');
+            });
+            
+            // Load music and ambience
+            this.load.audio('music', bgMusic);
+            this.load.audio('ambience', ambienceMusic);
+            
+            // Load normal maps for lighting
+            this.load.on('complete', () => {
+                console.log('All assets loaded. Textures available:', Object.keys(this.textures.list));
+                
+                // Special debug for danger_currents
+                if (this.textures.exists('danger_currents_small')) {
+                    console.log('✅ danger_currents_small image loaded successfully');
+                    const frame = this.textures.get('danger_currents_small').getSourceImage();
+                    console.log('Image dimensions:', frame.width, 'x', frame.height);
+                } else {
+                    console.error('❌ danger_currents_small image NOT FOUND in texture cache');
+                }
+            });
+            
+            // Load all the tilesets from imported assets
             this.load.image('black_and_blue', blackAndBlueImg);
             this.load.image('rock2', rock2Img);
             this.load.image('rock3', rock3Img);
@@ -269,6 +344,9 @@ export default class GameScene extends Phaser.Scene {
             // Load custom flashlight mask image
             this.load.image('flashlight_cone1', flashlightCone1Img);
             
+            // Load danger currents tileset
+            this.load.image('danger_currents_small', dangerCurrentsSmallImg);
+            
             // Explicitly load laser sprites for pin lights with simple naming
             // This uses laser_sprites from our imports at the top of the file
             console.log('[LIGHT] Loading laser sprites for pin lights...');
@@ -312,6 +390,10 @@ export default class GameScene extends Phaser.Scene {
                 .catch(error => {
                     console.error('Error initializing asset system:', error);
                 });
+
+            // Load harpoon arm assets
+            this.load.image('harpoon_arms_right', harpoonArmsRightImg);
+            this.load.image('harpoon_arms_left', harpoonArmsLeftImg);
         } catch (error) {
             console.error('Error in preload:', error);
         }
@@ -351,68 +433,37 @@ export default class GameScene extends Phaser.Scene {
      */
     findPivotInTexture(textureKey, storageProperty = 'armPivot') {
         try {
-            // Get the texture
+            // Get the texture for dimensions
             const texture = this.textures.get(textureKey);
-            const frame = texture.getFrameNames()[0] || '__BASE';
-            
-            // Create a temporary canvas to get pixel data
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // Get image dimensions
             const source = texture.getSourceImage();
             const width = source.width;
             const height = source.height;
             
-            // Set canvas size
-            canvas.width = width;
-            canvas.height = height;
+            // Hardcoded pivot points based on our scans
+            const pivotPoints = {
+                'arms': { x: 7, y: 5 },        // Regular right arm
+                'arms_left': { x: 81, y: 5 }   // Regular left arm
+            };
             
-            // Draw the image onto canvas
-            ctx.drawImage(source, 0, 0);
+            const point = pivotPoints[textureKey];
             
-            // Get image data - all pixels
-            const imageData = ctx.getImageData(0, 0, width, height).data;
-            
-            // Target color - magenta #fb00ff (251, 0, 255)
-            const targetR = 251;
-            const targetG = 0;
-            const targetB = 255;
-            
-            // Look for the magenta pixel
-            let pivotX = -1;
-            let pivotY = -1;
-            
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    const index = (y * width + x) * 4;
-                    const r = imageData[index];
-                    const g = imageData[index + 1];
-                    const b = imageData[index + 2];
-                    
-                    // Check if this pixel matches the magenta color
-                    if (r === targetR && g === targetG && b === targetB) {
-                        pivotX = x;
-                        pivotY = y;
-                        console.log(`[ARM PIVOT] Found magenta marker in ${textureKey} at pixel (${x}, ${y})`);
-                        // Break out of both loops once found
-                        y = height;
-                        break;
-                    }
-                }
-            }
-            
-            if (pivotX >= 0 && pivotY >= 0) {
+            if (point) {
                 // Calculate normalized origin values
-                const originX = pivotX / width;
-                const originY = pivotY / height;
+                const originX = point.x / width;
+                const originY = point.y / height;
                 
                 // Store these values for use when creating the diverArm sprite
-                this[storageProperty] = { x: originX, y: originY, pixelX: pivotX, pixelY: pivotY };
+                this[storageProperty] = { 
+                    x: originX, 
+                    y: originY, 
+                    pixelX: point.x, 
+                    pixelY: point.y 
+                };
                 
-                console.log(`[ARM PIVOT] Calculated normalized origin for ${textureKey}: (${originX.toFixed(3)}, ${originY.toFixed(3)})`);
+                console.log(`[ARM PIVOT] Using hardcoded pivot point for ${textureKey} at (${point.x}, ${point.y})`);
+                console.log(`[ARM PIVOT] Calculated normalized origin: (${originX.toFixed(3)}, ${originY.toFixed(3)})`);
             } else {
-                console.warn(`[ARM PIVOT] No magenta pivot marker found in ${textureKey} texture`);
+                console.warn(`[ARM PIVOT] No pivot point defined for ${textureKey}, using defaults`);
                 // Default fallback values
                 if (textureKey === 'arms') {
                     this[storageProperty] = { x: 0.0, y: 0.5, pixelX: 0, pixelY: height / 2 };
@@ -422,7 +473,7 @@ export default class GameScene extends Phaser.Scene {
                 }
             }
         } catch (error) {
-            console.error(`[ARM PIVOT] Error analyzing ${textureKey} texture:`, error);
+            console.error(`[ARM PIVOT] Error setting pivot for ${textureKey}:`, error);
             // Default fallback values
             if (textureKey === 'arms') {
                 this[storageProperty] = { x: 0.0, y: 0.5, pixelX: 0, pixelY: 0 };
@@ -558,6 +609,15 @@ export default class GameScene extends Phaser.Scene {
             
             // Initialize flashlight system
             this.flashlightSystem = new FlashlightSystem(this, this.darknessOverlay);
+
+            // Initialize weapon systems
+            this.weaponSystem = new WeaponSystem(this);
+            this.harpoonSystem = new HarpoonSystem(this);
+
+            // After player is created, initialize harpoon
+            if (this.player) {
+                this.harpoonSystem.create(this.player);
+            }
         } catch (error) {
             console.error('Error in create:', error);
         }
@@ -589,6 +649,9 @@ export default class GameScene extends Phaser.Scene {
             
             // Initialize player system
             this.playerSystem = new PlayerSystem(this);
+            
+            // Initialize default arm system
+            this.defaultArmSystem = new DefaultArmSystem(this);
             
             // Initialize battery system and hook up event listener
             this.batterySystem = new BatterySystem(this);
@@ -836,7 +899,67 @@ export default class GameScene extends Phaser.Scene {
                     const cleanName = tileset.name.replace(/^\.\.\//, '').replace(/\.png$/, '');
                     
                     console.log(`Attempting to add tileset: ${tileset.name} (cleaned: ${cleanName})`);
-                    const addedTileset = map.addTilesetImage(tileset.name, cleanName);
+                    
+                    // Special handling for image collection tilesets (like danger_currents)
+                    let addedTileset = null;
+                    
+                    // Special handling for danger_currents - log extra information
+                    if (tileset.name === 'danger_currents') {
+                        console.log(`🚨 Found danger_currents tileset:`, {
+                            name: tileset.name,
+                            firstgid: tileset.firstgid,
+                            tileWidth: tileset.tileWidth,
+                            tileHeight: tileset.tileHeight,
+                            tiles: tileset.tiles ? tileset.tiles.length : 0
+                        });
+                        
+                        // Check if the texture exists
+                        console.log(`Texture exists? ${this.textures.exists('danger_currents_small')}`);
+                        
+                        // Handle image collection tileset directly with the correct key
+                        addedTileset = map.addTilesetImage(tileset.name, 'danger_currents_small');
+                        
+                        // Register the tileset with additional metadata for later use
+                        if (addedTileset) {
+                            addedTileset.isImageCollection = true;
+                            addedTileset.imageKey = 'danger_currents_small';
+                        }
+                        
+                        console.log(`Added danger_currents tileset using key 'danger_currents_small':`, addedTileset);
+                    } else if (tileset.tiles && tileset.tiles.length > 0) {
+                        // Handle other image collection tilesets
+                        console.log(`Found image collection tileset: ${tileset.name} with ${tileset.tiles.length} tiles`);
+                        
+                        // Get the first tile's image to use as the key
+                        const firstTile = tileset.tiles[0];
+                        if (firstTile && firstTile.image) {
+                            const imagePath = firstTile.image;
+                            const fileName = imagePath.split('/').pop();
+                            const imageKey = fileName.replace(/\.png$/, '');
+                            
+                            console.log(`Using imageKey ${imageKey} from path ${imagePath}`);
+                            
+                            if (this.textures.exists(imageKey)) {
+                                console.log(`Texture ${imageKey} exists, using it for tileset ${tileset.name}`);
+                                addedTileset = map.addTilesetImage(tileset.name, imageKey);
+                                
+                                // Register the tileset with additional metadata
+                                if (addedTileset) {
+                                    addedTileset.isImageCollection = true;
+                                    addedTileset.imageKey = imageKey;
+                                }
+                            } else {
+                                console.warn(`Texture ${imageKey} not found for tileset ${tileset.name}`);
+                                addedTileset = map.addTilesetImage(tileset.name, cleanName);
+                            }
+                        } else {
+                            console.warn(`No valid image found in tileset ${tileset.name}`);
+                            addedTileset = map.addTilesetImage(tileset.name, cleanName);
+                        }
+                    } else {
+                        // Standard tileset handling
+                        addedTileset = map.addTilesetImage(tileset.name, cleanName);
+                    }
                     
                     if (addedTileset) {
                         console.log(`Added embedded tileset: ${tileset.name} → ${cleanName}`);
@@ -1017,6 +1140,30 @@ export default class GameScene extends Phaser.Scene {
                     }
                 }
             }
+            
+            // MANUALLY PLACE THE DANGER CURRENTS SIGN FOR TESTING
+            try {
+                const dangerTileset = addedTilesets.find(t => t.name === 'danger_currents');
+                if (dangerTileset) {
+                    console.log('Found danger tileset for manual placement, firstgid:', dangerTileset.firstgid);
+                    // Try to place it on the obstacles layer or background
+                    const layerToModify = this.layers?.Obstacles || this.layers?.Background;
+                    if (layerToModify) {
+                        // Place at a visible position (x: 300, y: 300)
+                        const tileGid = dangerTileset.firstgid; // First (and only) tile in the tileset
+                        console.log(`Manually placing danger currents tile (gid: ${tileGid}) at (300, 300)`);
+                        layerToModify.putTileAt(tileGid, 10, 10); // Convert to tile coordinates
+                    } else {
+                        console.error('No suitable layer found for manual placement');
+                    }
+                    
+                    // Alternative: Create a sprite directly
+                    const dangerSprite = this.add.sprite(400, 400, 'danger_currents_small');
+                    console.log('Created danger currents sprite directly:', dangerSprite);
+                }
+            } catch (e) {
+                console.error('Error placing danger currents tile manually:', e);
+            }
         } catch (error) {
             console.error('Error in createTiledMap:', error);
             this.createFallbackMap();
@@ -1132,7 +1279,7 @@ export default class GameScene extends Phaser.Scene {
                 
                 this.player.sprite.setCollideWorldBounds(true);
                 this.player.sprite.setVisible(true);
-                this.player.sprite.setDepth(25); // Ensure player is above ALL other elements including overlays
+                this.player.sprite.setDepth(4); // Player depth 4 (should be behind Obstacles layer at 7)
                 
                 // DIRECT ANIMATION APPROACH: create and play animation directly in setupPlayer
                 try {
@@ -1176,24 +1323,10 @@ export default class GameScene extends Phaser.Scene {
                     this.player.sprite.setTexture('player');
                 }
                 
-                // Add the diver arm sprite if the texture exists
-                if (this.textures.exists('arms')) {
-                    this.diverArm = this.add.sprite(this.player.sprite.x, this.player.sprite.y, 'arms');
-                    
-                    // Check if we've found the pivot point, otherwise use defaults
-                    if (this.armPivot) {
-                        console.log(`[ARM PIVOT] Applying pivot origin ${this.armPivot.x.toFixed(3)}, ${this.armPivot.y.toFixed(3)}`);
-                        this.diverArm.setOrigin(this.armPivot.x, this.armPivot.y);
-                    } else {
-                        console.warn('[ARM PIVOT] No pivot data found, using default origin');
-                        this.diverArm.setOrigin(0.0, 0.5);
-                    }
-                    
-                    this.diverArm.setDepth(this.player.sprite.depth + 1);
-                    this.diverArm.setVisible(true);
-                    console.log('Added diver arm sprite');
-                } else {
-                    console.error('[ARMS DEBUG] ❌ CRITICAL: arms texture not available');
+                // Initialize the default arm system with the player
+                if (this.defaultArmSystem) {
+                    this.defaultArmSystem.create(this.player);
+                    this.diverArm = this.defaultArmSystem.arm; // Keep reference for compatibility
                 }
                 
                 // Explicitly create helmet bubbles
@@ -1218,23 +1351,15 @@ export default class GameScene extends Phaser.Scene {
                 // Listen for boost start/end events to maintain arm position
                 this.player.on('boostStart', () => {
                     // Ensure arm stays attached when boost starts
-                    if (this.diverArm && this.player?.sprite) {
-                        const offsetX = this.player.sprite.flipX ? 3 : -3;
-                        this.diverArm.setPosition(
-                            this.player.sprite.x + offsetX,
-                            this.player.sprite.y - 47
-                        );
+                    if (this.defaultArmSystem && this.player?.sprite) {
+                        this.defaultArmSystem.update(this.player, this.input.activePointer);
                     }
                 });
                 
                 this.player.on('boostEnd', () => {
                     // Ensure arm stays attached when boost ends
-                    if (this.diverArm && this.player?.sprite) {
-                        const offsetX = this.player.sprite.flipX ? 3 : -3;
-                        this.diverArm.setPosition(
-                            this.player.sprite.x + offsetX,
-                            this.player.sprite.y - 47
-                        );
+                    if (this.defaultArmSystem && this.player?.sprite) {
+                        this.defaultArmSystem.update(this.player, this.input.activePointer);
                     }
                 });
                 
@@ -1449,98 +1574,9 @@ export default class GameScene extends Phaser.Scene {
     update(time, delta) {
         if (!this.gameRunning) return;
         
-        // ABSOLUTE MOUSE TRACKING PRIORITY
-        if (this.diverArm && this.player?.sprite) {
-            // Get mouse pointer position and player position
-            const pointer = this.input.activePointer;
-            const worldMouseX = this.cameras.main.scrollX + pointer.x;
-            const worldMouseY = this.cameras.main.scrollY + pointer.y;
-            const playerX = this.player.sprite.x;
-            const playerY = this.player.sprite.y;
-            
-            // Check if left mouse button is down (shooting)
-            const isShooting = pointer.isDown && pointer.button === 0;
-            
-            // CRITICAL: While shooting, mouse direction ALWAYS takes priority over movement
-            const isMouseOnLeft = worldMouseX < playerX;
-            
-            // Update player facing direction based ONLY on mouse position
-            // This ensures proper facing direction during shooting regardless of movement
-            this.player.sprite.flipX = isMouseOnLeft;
-            const isFacingLeft = this.player.sprite.flipX;
-            
-            // Position the arm directly at the shoulder with fixed offsets
-            const shoulderOffsetX = isFacingLeft ? 3 : -3;
-            const shoulderOffsetY = -47;
-            this.diverArm.x = playerX + shoulderOffsetX;
-            this.diverArm.y = playerY + shoulderOffsetY;
-            
-            // Update arm texture if direction changed
-            if (this.diverArm.isFacingLeft !== isFacingLeft) {
-                // Set the correct arm texture based on facing direction
-                const desiredKey = isFacingLeft ? 'arms_left' : 'arms';
-                this.diverArm.setTexture(desiredKey);
-                
-                // Reset any flip state
-                this.diverArm.setFlipX(false);
-                this.diverArm.setFlipY(false);
-                
-                // Apply the correct pivot origin
-                if (this.armPivot) {
-                    if (isFacingLeft && this.armPivotLeft) {
-                        this.diverArm.setOrigin(this.armPivotLeft.x, this.armPivotLeft.y);
-                    } else {
-                        this.diverArm.setOrigin(this.armPivot.x, this.armPivot.y);
-                    }
-                }
-                
-                // Store the new facing direction
-                this.diverArm.isFacingLeft = isFacingLeft;
-            }
-            
-            // Calculate true aim direction (used for bullet firing, etc.)
-            const rawAngle = Phaser.Math.Angle.Between(
-                this.diverArm.x, this.diverArm.y,
-                worldMouseX, worldMouseY
-            );
-            
-            // Store the raw angle for systems that need true direction
-            this.diverArm.trueDirection = rawAngle;
-            
-            // Get visual angle with clamping
-            let visualAngle = rawAngle;
-            const isAbove = worldMouseY < this.diverArm.y;
-            
-            if (isFacingLeft) {
-                // Left facing arm logic
-                let degrees = Phaser.Math.RadToDeg(rawAngle);
-                if (degrees < 0) degrees += 360;
-                
-                if (degrees < 90 || degrees > 270) {
-                    // Clamp to vertical when out of range
-                    visualAngle = Phaser.Math.DegToRad(isAbove ? 90 : 270);
-                }
-                
-                // Add PI for left-facing arm texture
-                visualAngle += Math.PI;
-            } else {
-                // Right facing arm logic
-                let degrees = Phaser.Math.RadToDeg(rawAngle);
-                
-                if (degrees < -90 || degrees > 90) {
-                    // Clamp to vertical when out of range
-                    visualAngle = Phaser.Math.DegToRad(isAbove ? -90 : 90);
-                }
-            }
-            
-            // Apply the rotation immediately
-            this.diverArm.setRotation(visualAngle);
-            this.diverArm.finalRotation = visualAngle;
-            
-            // Calculate arm tip position
-            const armLength = 70;
-            this.diverArm.tipX = this.diverArm.x + Math.cos(this.diverArm.trueDirection) * armLength;
-            this.diverArm.tipY = this.diverArm.y + Math.sin(this.diverArm.trueDirection) * armLength;
+        // Update default arm system first for proper aiming
+        if (this.defaultArmSystem && this.player) {
+            this.defaultArmSystem.update(this.player, this.input.activePointer);
         }
         
         // Simple animation check - ensure animation is playing
@@ -1625,15 +1661,20 @@ export default class GameScene extends Phaser.Scene {
         }
 
         // Emit arm data for flashlight system
-        if (this.diverArm && this.player?.sprite) {
+        if (this.defaultArmSystem?.arm && this.player?.sprite) {
             this.events.emit('armUpdated', {
-                x: this.diverArm.x,
-                y: this.diverArm.y,
-                rotation: this.diverArm.rotation,
-                tipX: this.diverArm.tipX,
-                tipY: this.diverArm.tipY,
-                trueDirection: this.diverArm.trueDirection
+                x: this.defaultArmSystem.arm.x,
+                y: this.defaultArmSystem.arm.y,
+                rotation: this.defaultArmSystem.arm.rotation,
+                tipX: this.defaultArmSystem.arm.tipX,
+                tipY: this.defaultArmSystem.arm.tipY,
+                trueDirection: this.defaultArmSystem.arm.trueDirection
             });
+        }
+
+        // Update harpoon system if it exists
+        if (this.harpoonSystem && this.player) {
+            this.harpoonSystem.update(this.player, this.input.activePointer);
         }
     }
 
@@ -1655,7 +1696,8 @@ export default class GameScene extends Phaser.Scene {
                 { system: this.oxygenMeter, name: 'OxygenMeter' },
                 { system: this.healthSystem, name: 'HealthSystem' },
                 { system: this.gameSceneCamera, name: 'GameSceneCamera' },
-                { system: this.currentSystem, name: 'CurrentSystem' }
+                { system: this.currentSystem, name: 'CurrentSystem' },
+                { system: this.defaultArmSystem, name: 'DefaultArmSystem' }
             ];
             
             // Clean up each system
@@ -1670,12 +1712,6 @@ export default class GameScene extends Phaser.Scene {
                 }
             });
             
-            // Clean up diver arm
-            if (this.diverArm) {
-                this.diverArm.destroy();
-                console.log('Cleaned up diver arm');
-            }
-            
             // Null out references
             this.tilemapSystem = null;
             this.airPocketSystem = null;
@@ -1684,6 +1720,8 @@ export default class GameScene extends Phaser.Scene {
             this.oxygenMeter = null;
             this.healthSystem = null;
             this.gameSceneCamera = null;
+            this.defaultArmSystem = null;
+            this.diverArm = null;
             
             console.log('GameScene cleanup completed');
         } catch (error) {
