@@ -5,7 +5,7 @@
   "scripts": {
     "start": "parcel src/index.html",
     "clean": "rimraf .parcel-cache dist",
-    "build": "npm run clean && parcel build src/index.html --public-url ./",
+    "build": "npm run clean && parcel build src/index.html --public-url /DiverGame/",
     "deploy": "npm run build && gh-pages -d dist"
   },
   "keywords": [
