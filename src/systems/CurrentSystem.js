@@ -4,6 +4,8 @@
  * This system processes polylines from a "current" object layer in Tiled maps
  * and applies directional forces to the player when they enter the current.
  */
+import Phaser from 'phaser';
+
 export default class CurrentSystem {
     /**
      * Create a new current system
@@ -11,26 +13,33 @@ export default class CurrentSystem {
      */
     constructor(scene) {
         this.scene = scene;
+        
+        // Player reference
         this.player = null;
+        
+        // Store current polylines/segments for force application
         this.currents = [];
+        
+        // Store polygon areas for area-based force application
         this.polygonAreas = [];
-        this.segmentTexts = [];
-        this.debugTexts = [];
+        
+        // Default influence range (how close player needs to be to feel the current)
+        this.influenceRange = 80;
+        
+        // Force calculation parameters
+        this.maxForce = 250;       // Base maximum force (lowered from 800)
+        this.forceMultiplier = 3.0;  // Higher multiplier to give more impact to Tiled strength values
+        
+        // Debug visualization
         this.isDebugMode = false;
         this.debugGraphics = null;
-        this.forceGraphics = null;
-        this.debugText = null;
-        this.forceText = null;
-        this.polygonForceText = null;
-        this.currentForceX = 0;
-        this.currentForceY = 0;
-        this.effectTimers = []; // Store timers for cleanup
-        this.currentEffectsDepth = null; // Will be calculated based on Tiled layer order
         
-        // Movement influence settings
-        this.influenceRange = 50; // Default range if width not specified
-        this.maxForce = 300; // Increased force cap from 100 to 300
-        this.forceMultiplier = 5.0; // Additional multiplier for stronger effects
+        // Visual representations of currents
+        this.currentVisuals = [];
+        this.useVisualSprites = true; // Flag to enable/disable visual sprites
+        
+        this.effectTimers = [];
+        this.currentEffectsDepth = 35;
         
         console.log('CurrentSystem created');
     }
@@ -295,6 +304,11 @@ export default class CurrentSystem {
             const end = absPoints[i + 1];
             
             this.createSegment(start, end, strength, width, direction, harpoonOnly);
+            
+            // Add visual representation if enabled
+            if (this.useVisualSprites) {
+                this.addCurrentVisual(start, end, direction);
+            }
         }
     }
     
@@ -463,8 +477,8 @@ export default class CurrentSystem {
             type, scale, frequency, lifetime, variance
         });
         
-        // Ensure strength is within the user's desired range of 1-5
-        strength = Phaser.Math.Clamp(strength, 1, 5);
+        // Ensure strength is within a wider range (1-10)
+        strength = Phaser.Math.Clamp(strength, 1, 10);
         
         return { 
             strength, width, direction, harpoonOnly,
@@ -874,6 +888,10 @@ export default class CurrentSystem {
             return;
         }
         
+        // Ensure critical properties are defined to prevent errors
+        if (this.maxForce === undefined) this.maxForce = 300;
+        if (this.forceMultiplier === undefined) this.forceMultiplier = 1;
+        
         // Debug visualizations are disabled
         /*
         // Don't clear persistent debug graphics, only dynamic force indicators
@@ -907,8 +925,8 @@ export default class CurrentSystem {
         for (let i = 0; i < this.polygonAreas.length; i++) {
             const polygon = this.polygonAreas[i];
             
-            // Skip if this polygon is for harpoon only (future feature)
-            if (polygon.harpoonOnly) {
+            // Skip if this polygon is missing data or is for harpoon only
+            if (!polygon || !polygon.points || polygon.harpoonOnly) {
                 continue;
             }
             
@@ -921,9 +939,12 @@ export default class CurrentSystem {
                 affectingPolygon = polygon;
                 
                 // Calculate force based on the polygon's direction
-                let forceX, forceY;
+                let forceX = 0, forceY = 0;
                 
-                if (polygon.direction) {
+                // Ensure polygon has required properties
+                polygon.strength = polygon.strength || 1;
+                
+                if (polygon.direction && polygon.directionVector) {
                     // Always use explicit direction if provided
                     forceX = polygon.directionVector.x * polygon.strength * this.maxForce * this.forceMultiplier;
                     forceY = polygon.directionVector.y * polygon.strength * this.maxForce * this.forceMultiplier;
@@ -1096,34 +1117,48 @@ export default class CurrentSystem {
         
         // Apply the accumulated force to the player if affected by any current
         if (affectedByAnyCurrent) {
+            // Validate values to prevent NaN and infinite values
+            if (isNaN(totalForceX) || !isFinite(totalForceX)) totalForceX = 0;
+            if (isNaN(totalForceY) || !isFinite(totalForceY)) totalForceY = 0;
+
+            // Clamp forces to reasonable values to prevent extreme acceleration
+            totalForceX = Math.max(-5000, Math.min(5000, totalForceX)); // Increased from -2500/2500
+            totalForceY = Math.max(-5000, Math.min(5000, totalForceY)); // Increased from -2500/2500
+            
             // Convert time delta to seconds for physics calculations
             const deltaSeconds = delta / 1000;
             
-            // Apply force directly to player velocity
-            // Use a stronger direct approach that both accelerates and sets minimum velocity
-            this.player.sprite.body.velocity.x += totalForceX * deltaSeconds;
-            this.player.sprite.body.velocity.y += totalForceY * deltaSeconds;
-            
-            // Ensure minimum current velocity (in the direction of the force)
-            if (Math.abs(totalForceX) > 10) {
-                const minVelocityX = Math.sign(totalForceX) * Math.min(Math.abs(totalForceX), 100);
-                if (Math.sign(this.player.sprite.body.velocity.x) === Math.sign(totalForceX)) {
-                    this.player.sprite.body.velocity.x = Math.sign(totalForceX) * 
-                        Math.max(Math.abs(this.player.sprite.body.velocity.x), Math.abs(minVelocityX));
+            try {
+                // Apply force directly to player velocity
+                // Use a stronger direct approach that both accelerates and sets minimum velocity
+                if (this.player && this.player.sprite && this.player.sprite.body) {
+                    this.player.sprite.body.velocity.x += totalForceX * deltaSeconds;
+                    this.player.sprite.body.velocity.y += totalForceY * deltaSeconds;
+                    
+                    // Ensure minimum current velocity (in the direction of the force)
+                    if (Math.abs(totalForceX) > 10) {
+                        const minVelocityX = Math.sign(totalForceX) * Math.min(Math.abs(totalForceX), 250); // Increased from 100
+                        if (Math.sign(this.player.sprite.body.velocity.x) === Math.sign(totalForceX)) {
+                            this.player.sprite.body.velocity.x = Math.sign(totalForceX) * 
+                                Math.max(Math.abs(this.player.sprite.body.velocity.x), Math.abs(minVelocityX));
+                        }
+                    }
+                    
+                    if (Math.abs(totalForceY) > 10) {
+                        const minVelocityY = Math.sign(totalForceY) * Math.min(Math.abs(totalForceY), 250); // Increased from 100
+                        if (Math.sign(this.player.sprite.body.velocity.y) === Math.sign(totalForceY)) {
+                            this.player.sprite.body.velocity.y = Math.sign(totalForceY) * 
+                                Math.max(Math.abs(this.player.sprite.body.velocity.y), Math.abs(minVelocityY));
+                        }
+                    }
+                    
+                    // Apply a larger instant position nudge for more immediate feedback
+                    this.player.sprite.x += totalForceX * deltaSeconds * 0.2; // Increased from 0.1
+                    this.player.sprite.y += totalForceY * deltaSeconds * 0.2; // Increased from 0.1
                 }
+            } catch (error) {
+                console.warn('Error applying current forces to player:', error);
             }
-            
-            if (Math.abs(totalForceY) > 10) {
-                const minVelocityY = Math.sign(totalForceY) * Math.min(Math.abs(totalForceY), 100);
-                if (Math.sign(this.player.sprite.body.velocity.y) === Math.sign(totalForceY)) {
-                    this.player.sprite.body.velocity.y = Math.sign(totalForceY) * 
-                        Math.max(Math.abs(this.player.sprite.body.velocity.y), Math.abs(minVelocityY));
-                }
-            }
-            
-            // Apply a small instant position nudge for more immediate feedback
-            this.player.sprite.x += totalForceX * deltaSeconds * 0.1;
-            this.player.sprite.y += totalForceY * deltaSeconds * 0.1;
             
             // Debug visualization removed
             /*
@@ -1233,63 +1268,18 @@ export default class CurrentSystem {
      * Clean up resources
      */
     destroy() {
+        // Clean up debug graphics
         if (this.debugGraphics) {
-            this.debugGraphics.clear();
             this.debugGraphics.destroy();
             this.debugGraphics = null;
         }
         
-        if (this.forceGraphics) {
-            this.forceGraphics.clear();
-            this.forceGraphics.destroy();
-            this.forceGraphics = null;
-        }
+        // Clean up current visualizations
+        this.cleanupVisuals();
         
-        if (this.debugText) {
-            this.debugText.destroy();
-            this.debugText = null;
-        }
-        
-        if (this.forceText) {
-            this.forceText.destroy();
-            this.forceText = null;
-        }
-        
-        if (this.polygonForceText) {
-            this.polygonForceText.destroy();
-            this.polygonForceText = null;
-        }
-        
-        if (this.segmentTexts) {
-            this.segmentTexts.forEach(text => {
-                if (text) text.destroy();
-            });
-            this.segmentTexts = null;
-        }
-        
-        if (this.debugTexts) {
-            this.debugTexts.forEach(text => {
-                if (text) text.destroy();
-            });
-            this.debugTexts = null;
-        }
-        
-        // Clean up effect timers and containers
-        if (this.effectTimers) {
-            this.effectTimers.forEach(item => {
-                if (item.timer) {
-                    item.timer.remove();
-                }
-                if (item.container) {
-                    item.container.destroy();
-                }
-            });
-            this.effectTimers = [];
-        }
-        
+        // Clear data arrays
         this.currents = [];
         this.polygonAreas = [];
-        this.player = null;
         
         console.log('CurrentSystem destroyed');
     }
@@ -1648,98 +1638,122 @@ export default class CurrentSystem {
         const container = this.scene.add.container(x, y);
         
         // Use the calculated depth from Tiled layer order, or fall back to a default of 35
-        // This ensures that the current effects respect the Tiled layer ordering
         const effectDepth = this.currentEffectsDepth || 35;
         container.setDepth(effectDepth);
-        console.log(`🫧 Setting effect depth to ${effectDepth}`);
         
-        // Check if textures exist and log them
+        // Special handling for ripple effect
+        if (type === 'ripple') {
+            const timer = this.scene.time.addEvent({
+                delay: frequency,
+                callback: () => {
+                    // Create a circle for the ripple
+                    const ripple = this.scene.add.circle(0, 0, 5, 0xaaffff, 0.8);
+                    container.add(ripple);
+                    
+                    // Random offset for spawn position
+                    const offsetX = Phaser.Math.Between(-10, 10);
+                    const offsetY = Phaser.Math.Between(-10, 10);
+                    ripple.setPosition(offsetX, offsetY);
+                    
+                    // Expand and fade out the ripple
+                    this.scene.tweens.add({
+                        targets: ripple,
+                        radius: 30,
+                        alpha: 0,
+                        scale: { from: 0.5, to: 2 },
+                        duration: lifetime,
+                        ease: 'Quad.easeOut',
+                        onComplete: () => {
+                            container.remove(ripple);
+                            ripple.destroy();
+                        }
+                    });
+                    
+                    // Add a second ring for more visual interest
+                    const innerRipple = this.scene.add.circle(offsetX, offsetY, 3, 0xffffff, 1);
+                    container.add(innerRipple);
+                    
+                    this.scene.tweens.add({
+                        targets: innerRipple,
+                        radius: 20,
+                        alpha: 0,
+                        scale: { from: 0.3, to: 1.5 },
+                        duration: lifetime * 0.7,
+                        ease: 'Quad.easeOut',
+                        onComplete: () => {
+                            container.remove(innerRipple);
+                            innerRipple.destroy();
+                        }
+                    });
+                },
+                callbackScope: this,
+                loop: true
+            });
+            
+            // Store reference for cleanup
+            if (!this.effectTimers) {
+                this.effectTimers = [];
+            }
+            this.effectTimers.push({ timer, container });
+            
+            // Immediately create one ripple
+            timer.callback.call(this);
+            
+            return container;
+        }
+        
+        // Original bubble effect code for non-ripple types
         const availableTextures = [];
         ['air_pocket1', 'air_pocket2', 'air_pocket3', 'bubble', 'bg_bubble1', 'bg_bubble2', 'bg_bubble3'].forEach(texture => {
-            const exists = this.scene.textures.exists(texture);
-            console.log(`🫧 Texture check: ${texture} - ${exists ? 'EXISTS' : 'MISSING'}`);
-            if (exists) availableTextures.push(texture);
+            if (this.scene.textures.exists(texture)) {
+                availableTextures.push(texture);
+            }
         });
         
-        // Log about preloaded assets
-        console.log(`🫧 Available bubble textures: ${availableTextures.length > 0 ? availableTextures.join(', ') : 'NONE'}`);
-        
-        // Create a subtle marker (nearly invisible) to mark the spawn point
-        const marker = this.scene.add.circle(0, 0, 2, 0x00ffff, 0.2);
-        container.add(marker);
-        
-        // Set up a timer to spawn effects - use the provided frequency
         const timer = this.scene.time.addEvent({
-            delay: frequency, // Use the exact frequency passed in
+            delay: frequency,
             callback: () => {
                 let sprite;
                 const offsetX = Phaser.Math.Between(-10, 10);
                 const offsetY = Phaser.Math.Between(-10, 10);
                 
-                // First try: use available textures
                 if (availableTextures.length > 0) {
                     const randomTexture = availableTextures[Math.floor(Math.random() * availableTextures.length)];
-                    try {
-                        sprite = this.scene.add.sprite(offsetX, offsetY, randomTexture);
-                    } catch (error) {
-                        console.warn(`🫧 Error creating sprite with texture ${randomTexture}:`, error);
-                        sprite = null;
-                    }
-                }
-                
-                // Fallback: create a custom bubble with graphics
-                if (!sprite) {
+                    sprite = this.scene.add.sprite(offsetX, offsetY, randomTexture);
+                } else {
                     const graphics = this.scene.add.graphics();
-                    
-                    // Draw a fancy bubble with gradient-like effect
-                    // Outer circle (semi-transparent)
                     graphics.fillStyle(0x88ffff, 0.5);
                     graphics.fillCircle(0, 0, 8);
-                    
-                    // Middle circle
                     graphics.fillStyle(0xaaffff, 0.7);
                     graphics.fillCircle(0, 0, 6);
-                    
-                    // Inner circle
                     graphics.fillStyle(0xccffff, 0.9);
                     graphics.fillCircle(0, 0, 4);
-                    
-                    // Highlight
                     graphics.fillStyle(0xffffff, 0.8);
                     graphics.fillCircle(-2, -2, 2);
-                    
-                    // Add outline
                     graphics.lineStyle(1, 0xffffff, 0.6);
                     graphics.strokeCircle(0, 0, 8);
-                    
-                    // Position the graphics
                     graphics.x = offsetX;
                     graphics.y = offsetY;
-                    
                     sprite = graphics;
                 }
                 
-                // Calculate scale variation range based on variance setting (1-5)
-                // Higher variance means more random size differences
-                const minVariation = 1 - (variance * 0.08); // 0.92 at variance 1, 0.6 at variance 5
-                const maxVariation = 1 + (variance * 0.08); // 1.08 at variance 1, 1.4 at variance 5
+                const finalScale = scale * Phaser.Math.FloatBetween(
+                    1 - (variance * 0.08),
+                    1 + (variance * 0.08)
+                );
                 
-                // Apply scale directly to the sprite with variance
-                const finalScale = scale * Phaser.Math.FloatBetween(minVariation, maxVariation);
                 if (sprite.setScale) {
                     sprite.setScale(finalScale);
                 }
                 
-                // Add to container
                 container.add(sprite);
                 
-                // Set up movement animation
                 this.scene.tweens.add({
                     targets: sprite,
                     x: offsetX + directionVector.x * 100,
                     y: offsetY + directionVector.y * 100,
                     alpha: 0,
-                    scale: sprite.setScale ? finalScale * 1.5 : 0.1, // Handle both sprite and graphics
+                    scale: sprite.setScale ? finalScale * 1.5 : 0.1,
                     duration: lifetime,
                     ease: 'Sine.easeOut',
                     onComplete: () => {
@@ -1752,16 +1766,9 @@ export default class CurrentSystem {
             loop: true
         });
         
-        // Immediately create one bubble to ensure something shows up right away
         timer.callback.call(this);
-        
-        // Store reference for cleanup
-        if (!this.effectTimers) {
-            this.effectTimers = [];
-        }
         this.effectTimers.push({ timer, container });
-        
-        return container; // Return the container in case we need to reference it later
+        return container;
     }
     
     /**
@@ -1871,5 +1878,66 @@ export default class CurrentSystem {
             console.error(`Error determining layer depth for ${layerName}:`, error);
             return defaultDepth;
         }
+    }
+
+    /**
+     * Add a visual representation of a current segment
+     * @param {Object} start - Start point {x, y}
+     * @param {Object} end - End point {x, y}
+     * @param {string} direction - Direction of the current
+     */
+    addCurrentVisual(start, end, direction) {
+        try {
+            // Calculate the midpoint of the segment
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+            
+            // Calculate the angle between start and end points
+            const angle = Math.atan2(end.y - start.y, end.x - start.x);
+            
+            // Create a sprite at the midpoint using the danger_currents_small image
+            const visual = this.scene.add.sprite(midX, midY, 'danger_currents_small');
+            visual.setOrigin(0.5, 0.5);
+            
+            // Set the scale based on the segment length
+            const distance = Phaser.Math.Distance.Between(start.x, start.y, end.x, end.y);
+            const scale = Math.min(distance / 200, 1); // Adjust scale based on segment length
+            visual.setScale(scale);
+            
+            // Rotate to match the segment direction
+            visual.setRotation(angle);
+            
+            // Apply a visual effect to make it look more dynamic
+            visual.setAlpha(0.8);
+            
+            // Add a simple animation to make it look like flowing water
+            this.scene.tweens.add({
+                targets: visual,
+                alpha: { from: 0.6, to: 0.9 },
+                duration: 1500,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+            
+            // Store the visual for later cleanup
+            this.currentVisuals.push(visual);
+            
+            console.log(`🌊 Added current visual at (${midX}, ${midY})`);
+        } catch (error) {
+            console.error('Error creating current visual:', error);
+        }
+    }
+    
+    /**
+     * Clean up all current visuals
+     */
+    cleanupVisuals() {
+        this.currentVisuals.forEach(visual => {
+            if (visual && !visual.destroyed) {
+                visual.destroy();
+            }
+        });
+        this.currentVisuals = [];
     }
 } 

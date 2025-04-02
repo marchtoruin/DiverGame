@@ -53,6 +53,7 @@ export default class TilemapSystem {
             '../air_pocket1.png': 'air_pocket1',
             '../air_pocket2.png': 'air_pocket2', 
             '../air_pocket3.png': 'air_pocket3',
+            '../danger_currents_small.png': 'danger_currents_small',
             
             // Filename-only mappings
             'underwater_bg.png': 'underwater_bg',
@@ -62,6 +63,7 @@ export default class TilemapSystem {
             'air_pocket1.png': 'air_pocket1',
             'air_pocket2.png': 'air_pocket2',
             'air_pocket3.png': 'air_pocket3',
+            'danger_currents_small.png': 'danger_currents_small',
             
             // FirstGID-based mappings (fallbacks for specific tilesets)
             'firstgid_1': 'underwater_bg',
@@ -75,6 +77,17 @@ export default class TilemapSystem {
         try {
             // Use AssetManagementSystem to get the correct texture key
             const textureKey = this.scene.assetSystem.getTilesetKey(tileset.name);
+            
+            // Special handling for image collection tilesets
+            if (tileset.tiles && tileset.tiles.length === 1 && tileset.tiles[0].image) {
+                // This is an image tileset, extract the image name without path
+                const imagePath = tileset.tiles[0].image;
+                const imageFile = imagePath.split('/').pop(); // Get just the filename
+                const imageNameWithoutExt = imageFile.replace(/\.png$/, '');
+                
+                console.log(`Detected image collection tileset: ${tileset.name} with image: ${imageFile}, using key: ${imageNameWithoutExt}`);
+                return map.addTilesetImage(tileset.name, imageNameWithoutExt);
+            }
             
             console.log(`Adding tileset ${tileset.name} with texture key: ${textureKey}`);
             return map.addTilesetImage(tileset.name, textureKey);
@@ -474,6 +487,18 @@ export default class TilemapSystem {
     processMapLayers(map, tilesets, options = {}) {
         const processedLayers = {};
         
+        // Find danger_currents tileset for debugging
+        const dangerCurrentsTileset = tilesets.find(tileset => tileset.name === 'danger_currents');
+        console.log('Found danger_currents tileset in tilesets array?', !!dangerCurrentsTileset);
+        if (dangerCurrentsTileset) {
+            console.log('danger_currents tileset details:', {
+                name: dangerCurrentsTileset.name,
+                firstgid: dangerCurrentsTileset.firstgid,
+                tileWidth: dangerCurrentsTileset.tileWidth,
+                tileHeight: dangerCurrentsTileset.tileHeight
+            });
+        }
+        
         // Default layer configuration patterns - can be overridden with options
         const layerConfigs = {
             background: {
@@ -486,98 +511,80 @@ export default class TilemapSystem {
                         .setPosition(-map.tileWidth * 25, -map.tileHeight * 25);
                 }
             },
-            backgroundSprites: {
-                // Make pattern more flexible to match with or without underscore and case insensitive
-                pattern: /^background[_]?sprites$/i,
+            
+            background_sprites: {
+                pattern: /^background_sprites$/i,
                 setup: (layer) => {
                     console.log(`Setting up background sprites layer: ${layer.layer.name}`);
-                    // Make sure the layer is fully visible
-                    return layer.setDepth(10)
+                    return layer.setDepth(1)
                         .setScrollFactor(0.4)
-                        .setScale(1.0)
-                        .setVisible(true)
-                        .setAlpha(1);
+                        .setScale(1.0);
                 }
             },
-            midground: {
-                // Make sure we catch the exact midground_sprites layer
-                pattern: /^midground[_]?sprites$/i,
+            
+            midground_sprites: {
+                pattern: /^midground_sprites$/i,
                 setup: (layer) => {
                     console.log(`Setting up midground sprites layer: ${layer.layer.name}`);
-                    // Make sure the layer is fully visible
-                    return layer.setDepth(20)
+                    // Special processing for midground layer which may contain image collection tiles
+                    this.processImageCollectionTiles(layer, map, tilesets);
+                    
+                    return layer.setDepth(2)
                         .setScrollFactor(0.8)
-                        .setScale(1.0)
-                        .setVisible(true)
-                        .setAlpha(1);
+                        .setScale(1.0);
                 }
             },
+            
+            signs: {
+                pattern: /^signs$/i,
+                setup: (layer) => {
+                    console.log(`Setting up signs layer: ${layer.layer.name}`);
+                    // Special processing for signs layer which contains image collection tiles
+                    this.processImageCollectionTiles(layer, map, tilesets);
+                    
+                    return layer.setDepth(4) // Just below obstacles (5), but above midground (2)
+                        .setScrollFactor(1.0) // No parallax, same as player
+                        .setScale(1.0);
+                }
+            },
+            
             obstacles: {
                 pattern: /^obstacles$/i,
                 setup: (layer) => {
-                    console.log(`Setting up obstacle layer: ${layer.layer.name}`);
-                    
-                    // Debug visualization
-                    console.log('Obstacle layer details:', {
-                        visible: layer.visible,
-                        alpha: layer.alpha,
-                        tilesets: layer.tilemap.tilesets.map(t => ({
-                            name: t.name,
-                            firstgid: t.firstgid,
-                            total: t.total
-                        }))
-                    });
-
-                    // Enable debug rendering if in debug mode
-                    if (layer.scene.physics.config.debug) {
-                        const debugGraphics = layer.scene.add.graphics();
-                        layer.renderDebug(debugGraphics, {
-                            tileColor: null,
-                            collidingTileColor: new Phaser.Display.Color(243, 134, 48, 128),
-                            faceColor: new Phaser.Display.Color(40, 39, 37, 128)
-                        });
-                    }
-
+                    console.log(`Setting up obstacles layer: ${layer.layer.name}`);
                     layer.setCollisionByExclusion([-1]);
-                    const result = layer.setDepth(40)  // Standardized to 40 to match highest value
+                    return layer.setDepth(5)
                         .setScrollFactor(1.0)
-                        .setScale(1.0)
-                        .setVisible(true)
-                        .setAlpha(1);
-                        
-                    // Debug log the final state
-                    console.log('Obstacle layer setup complete:', {
-                        depth: layer.depth,
-                        visible: layer.visible,
-                        alpha: layer.alpha,
-                        scrollFactor: layer.scrollFactorX
-                    });
-                    
-                    return result;
+                        .setScale(1.0);
                 }
             },
-            foreground: {
-                pattern: /^foreground/i,
-                setup: (layer) => {
-                    console.log(`Setting up foreground layer: ${layer.layer.name}`);
-                    return layer.setDepth(50)
-                        .setScrollFactor(1.0)
-                        .setScale(1.0)
-                        .setVisible(true)
-                        .setAlpha(1);
-                }
-            },
-            // Default for any unrecognized layer
+            
+            // Default for any unlisted layer
             default: {
+                pattern: /.*/,
                 setup: (layer) => {
-                    console.log(`Setting up generic layer: ${layer.layer.name}`);
-                    return layer.setDepth(30)
+                    console.log(`Setting up default layer: ${layer.layer.name}`);
+                    return layer.setDepth(1)
                         .setScrollFactor(1.0)
-                        .setScale(1.0)
-                        .setVisible(true)
-                        .setAlpha(1);
+                        .setScale(1.0);
                 }
             }
+        };
+        
+        // Also handle specific object layers for correct depth
+        this.objectLayerDepths = {
+            'current': 12,          // Topmost layer
+            'jellyfish': 11,        // Near top interactive layer
+            'Lighting': 10,         // Lighting effects 
+            'PlayerSpawn': 9,       // Spawn points (not visual)
+            'AirPockets': 8,        // Same depth as Obstacles
+            'Obstacles': 7,         // Main collision layer
+            'Signs': 5,             // Behind Obstacles but in front of lights
+            'lights': 3,            // Between Signs and Midground_sprites
+            'Midground_sprites': 2, // Background elements with some parallax
+            'Background_sprites': 1, // Far background with more parallax
+            'Background': 0,         // Very back with maximum parallax
+            'current_effects': 11.5  // Between current and jellyfish
         };
         
         // Get all layer names from the map
@@ -649,69 +656,118 @@ export default class TilemapSystem {
      * @param {Phaser.Tilemaps.Tilemap} map - The tilemap to process
      * @returns {Object} Object containing extracted object data
      */
-    processObjectLayers(map) {
-        const objectData = {
-            airPockets: [],
-            playerSpawns: [],
-            enemySpawns: [],
-            collectibles: [],
-            triggers: [],
-            other: []
-        };
-        
-        if (!map.objects || !map.objects.length) {
-            console.log('No object layers found in map');
-            return objectData;
+    processObjectLayers() {
+        if (!this.map || !this.map.objects) {
+            console.log('No objects to process in the map');
+            return this.objectLayers;
         }
         
-        // Process each object layer
-        map.objects.forEach(objectLayer => {
-            console.log(`Processing object layer: ${objectLayer.name}`);
-            
-            if (!objectLayer.objects || !objectLayer.objects.length) {
-                console.log(`No objects in layer ${objectLayer.name}`);
-                return;
+        console.log(`Map has ${this.map.objects.length} object layers`);
+        
+        this.map.objects.forEach(objectLayer => {
+            // Apply depth settings for visual object layers
+            if (this.objectLayerDepths[objectLayer.name]) {
+                const layerDepth = this.objectLayerDepths[objectLayer.name];
+                console.log(`Setting depth ${layerDepth} for object layer: ${objectLayer.name}`);
+                
+                // For layers that have sprites or visual elements created from them
+                if (objectLayer.name === 'lights' || objectLayer.name === 'current_effects') {
+                    // This will be used when creating sprites from these object layers
+                    objectLayer.renderDepth = layerDepth;
+                }
             }
             
-            // Process objects based on layer name patterns
-            objectLayer.objects.forEach(obj => {
-                // Copy the object to avoid reference issues
-                const objCopy = { ...obj };
-                
-                // Add the layer name to the object for reference
-                objCopy.layerName = objectLayer.name;
-                
-                // Categorize by layer name
-                if (objectLayer.name.toLowerCase().includes('airpocket')) {
-                    objectData.airPockets.push(objCopy);
-                } else if (objectLayer.name.toLowerCase().includes('spawn')) {
-                    if (obj.name && obj.name.toLowerCase().includes('player')) {
-                        objectData.playerSpawns.push(objCopy);
-                    } else if (obj.name && obj.name.toLowerCase().includes('enemy')) {
-                        objectData.enemySpawns.push(objCopy);
+            // Rest of your object layer processing code
+            const normalizedName = objectLayer.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+            this.objectLayers[normalizedName] = objectLayer;
+            
+            // Special handling for different layer types
+            switch (objectLayer.name) {
+                case 'PlayerSpawn':
+                    console.log('Processing PlayerSpawn layer');
+                    // We expect only one spawn point in this layer
+                    const spawnPoint = objectLayer.objects[0]; // Just use the first one
+                    if (spawnPoint) {
+                        this.playerSpawnPoint = {
+                            x: spawnPoint.x,
+                            y: spawnPoint.y
+                        };
+                        console.log(`Found player spawn point at ${this.playerSpawnPoint.x}, ${this.playerSpawnPoint.y}`);
                     } else {
-                        objectData.other.push(objCopy);
+                        console.warn('No spawn point found in PlayerSpawn layer');
                     }
-                } else if (objectLayer.name.toLowerCase().includes('collectible')) {
-                    objectData.collectibles.push(objCopy);
-                } else if (objectLayer.name.toLowerCase().includes('trigger')) {
-                    objectData.triggers.push(objCopy);
-                } else {
-                    objectData.other.push(objCopy);
-                }
-            });
+                    break;
+                    
+                case 'AirPockets':
+                    console.log('Processing AirPockets layer with air_pocket objects');
+                    // Show details of all objects in this layer
+                    objectLayer.objects.forEach((obj, index) => {
+                        // Convert properties array to object for easier viewing
+                        const props = {};
+                        if (obj.properties && Array.isArray(obj.properties)) {
+                            obj.properties.forEach(prop => {
+                                props[prop.name] = prop.value;
+                            });
+                        } else if (obj.properties) {
+                            Object.assign(props, obj.properties);
+                        }
+                        
+                        console.log(`AirPocket object ${index}:`, {
+                            name: obj.name,
+                            x: obj.x, 
+                            y: obj.y,
+                            properties: props
+                        });
+                        
+                        // Fix common naming issues - ensure objects have the right name
+                        if (!obj.name || obj.name === '' || obj.name.toLowerCase() === 'airpocket') {
+                            console.log(`Fixing unnamed air pocket object at (${obj.x}, ${obj.y}) to have name 'air_pocket'`);
+                            obj.name = 'air_pocket';
+                        }
+                    });
+                    
+                    // Count objects with the correct name
+                    const validAirPockets = objectLayer.objects.filter(obj => 
+                        obj.name === 'air_pocket' || 
+                        obj.name.toLowerCase() === 'airpocket' || 
+                        obj.name === ''
+                    );
+                    
+                    console.log(`Found ${validAirPockets.length} objects that could be air_pockets in AirPockets layer`);
+                    
+                    // If we have objects with no name or incorrect names, fix them
+                    if (validAirPockets.length !== objectLayer.objects.length) {
+                        console.log(`Warning: ${objectLayer.objects.length - validAirPockets.length} objects in AirPockets layer are not named 'air_pocket'`);
+                    }
+                    
+                    // Send air pocket objects to the AirPocketSystem
+                    if (this.scene.airPocketSystem) {
+                        // Add the layer name to each object for filtering
+                        const airPocketObjects = objectLayer.objects.map(obj => ({
+                            ...obj,
+                            layerName: 'AirPockets'
+                        }));
+                        
+                        // Use the specialized method for processing air pockets
+                        this.scene.airPocketSystem.processAirPockets(airPocketObjects);
+                    }
+                    break;
+                    
+                default:
+                    console.log(`Skipping unrecognized layer: ${objectLayer.name}`);
+            }
         });
         
         console.log('Object layer processing complete:', {
-            airPockets: objectData.airPockets.length,
-            playerSpawns: objectData.playerSpawns.length,
-            enemySpawns: objectData.enemySpawns.length,
-            collectibles: objectData.collectibles.length,
-            triggers: objectData.triggers.length,
-            other: objectData.other.length
+            airPockets: this.objectLayers.airPockets.length,
+            playerSpawns: this.objectLayers.playerSpawns.length,
+            enemySpawns: this.objectLayers.enemySpawns.length,
+            collectibles: this.objectLayers.collectibles.length,
+            triggers: this.objectLayers.triggers.length,
+            other: this.objectLayers.other.length
         });
         
-        return objectData;
+        return this.objectLayers;
     }
 
     /**
@@ -811,6 +867,126 @@ export default class TilemapSystem {
         } catch (error) {
             console.error('Error checking position blocked:', error);
             return false;
+        }
+    }
+
+    /**
+     * Special method to handle image collection tiles in layers like Midground_sprites
+     * @param {Phaser.Tilemaps.TilemapLayer} layer - The layer to process
+     * @param {Phaser.Tilemaps.Tilemap} map - The tilemap
+     * @param {Array} tilesets - Array of tilesets
+     */
+    processImageCollectionTiles(layer, map, tilesets) {
+        console.log(`🔎 Processing image collection tiles in layer: ${layer.layer.name}`);
+        
+        // Get the layer data from the map
+        const layerData = map.layers.find(l => l.name === layer.layer.name);
+        if (!layerData || !layerData.data) {
+            console.error(`Cannot find layer data for ${layer.layer.name}`);
+            return;
+        }
+        
+        try {
+            // Get all image collection tilesets
+            const imageCollectionTilesets = tilesets.filter(ts => {
+                // Look for tilesets with the tiles property (image collections)
+                if (ts.name === 'danger_currents') {
+                    return true; // Explicitly include danger_currents
+                }
+                // Check for tilesets with tiles property or specific properties indicating image collections
+                return (ts.tiles && ts.tiles.length > 0) || ts.isImageCollection;
+            });
+            
+            console.log(`🔎 Found ${imageCollectionTilesets.length} image collection tilesets:`, 
+                imageCollectionTilesets.map(ts => ts.name));
+            
+            if (imageCollectionTilesets.length > 0) {
+                let processedTileCount = 0;
+                
+                // Manually scan the layer data for tiles from these tilesets
+                for (let y = 0; y < layerData.height; y++) {
+                    for (let x = 0; x < layerData.width; x++) {
+                        const tileIdx = y * layerData.width + x;
+                        const tileId = layerData.data[tileIdx];
+                        
+                        // Skip empty tiles
+                        if (tileId === 0) continue;
+                        
+                        // Check if this tile belongs to an image collection tileset
+                        for (const ts of imageCollectionTilesets) {
+                            if (tileId >= ts.firstgid && tileId < ts.firstgid + ts.total) {
+                                processedTileCount++;
+                                // Get pixel coordinates
+                                const pixelX = x * map.tileWidth;
+                                const pixelY = y * map.tileHeight;
+                                
+                                // Get the correct texture key for this tileset
+                                let textureKey = null;
+                                
+                                // Handle special cases first
+                                if (ts.name === 'danger_currents') {
+                                    textureKey = 'danger_currents_small';
+                                    console.log(`🎯 Found danger_currents tile at (${x}, ${y}) with ID ${tileId}`);
+                                } else if (ts.imageKey) {
+                                    // Use the imageKey if it was set in GameScene.js
+                                    textureKey = ts.imageKey;
+                                    console.log(`🎯 Using predefined imageKey ${textureKey} for tileset ${ts.name}`);
+                                } else {
+                                    // For regular image collection tilesets, try to get the image path
+                                    // from the tileset definition
+                                    const tileIndex = tileId - ts.firstgid;
+                                    if (ts.tiles && ts.tiles[tileIndex] && ts.tiles[tileIndex].image) {
+                                        // Extract base name from the image path
+                                        const imagePath = ts.tiles[tileIndex].image;
+                                        const baseFileName = imagePath.split('/').pop().replace(/\.png$/, '');
+                                        textureKey = baseFileName;
+                                        
+                                        console.log(`🎯 For tileset ${ts.name}, using image ${baseFileName} for tile ${tileIndex}`);
+                                    } else {
+                                        // Fallback - try using the tileset name
+                                        textureKey = ts.name;
+                                        console.log(`🎯 Using tileset name as textureKey: ${textureKey}`);
+                                    }
+                                }
+                                
+                                // Try to create a sprite if we have a valid texture key
+                                if (textureKey && this.scene.textures.exists(textureKey)) {
+                                    console.log(`✅ Creating sprite with texture ${textureKey} at (${pixelX}, ${pixelY})`);
+                                    
+                                    try {
+                                        // Create a sprite at the tile position
+                                        const sprite = this.scene.add.sprite(pixelX, pixelY, textureKey);
+                                        
+                                        // Center the sprite at the tile position
+                                        sprite.setOrigin(0, 0);
+                                        
+                                        // Set depth to be above the layer
+                                        sprite.setDepth(layer.depth + 1);
+                                        
+                                        // Match the layer's scroll factor
+                                        sprite.setScrollFactor(layer.scrollFactorX, layer.scrollFactorY);
+                                        
+                                        console.log(`✅ Created ${textureKey} sprite at (${pixelX}, ${pixelY})`);
+                                    } catch (spriteError) {
+                                        console.error(`❌ Error creating sprite for ${textureKey}:`, spriteError);
+                                    }
+                                } else {
+                                    console.error(`❌ Could not find texture ${textureKey} for tileset ${ts.name}`);
+                                    // List available textures to help debug
+                                    console.log(`Available textures: ${Object.keys(this.scene.textures.list).filter(k => !k.startsWith('__')).join(', ')}`);
+                                }
+                                
+                                // We've found a match, no need to check other tilesets
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                console.log(`🔎 Processed ${processedTileCount} image collection tiles in layer ${layer.layer.name}`);
+            }
+        } catch (error) {
+            console.error(`❌ Error processing image collection tiles in ${layer.layer.name}:`, error);
         }
     }
 } 

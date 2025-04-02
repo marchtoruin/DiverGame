@@ -1,13 +1,27 @@
 import Phaser from 'phaser';
+import omegaDeepLogo from '../assets/OmegaDeepLogo.png';
 
 export default class DebugMapScene extends Phaser.Scene {
     constructor() {
         super({ key: 'DebugMapScene' });
     }
 
+    preload() {
+        this.load.image('omega_deep_logo', omegaDeepLogo);
+    }
+
     create() {
-        // Set background color
-        this.cameras.main.setBackgroundColor('#000033');
+        // Add the logo as background
+        const logo = this.add.image(this.cameras.main.centerX, this.cameras.main.centerY, 'omega_deep_logo');
+        
+        // Scale the logo to fit the screen while maintaining aspect ratio
+        const scaleX = this.cameras.main.width / logo.width;
+        const scaleY = this.cameras.main.height / logo.height;
+        const scale = Math.max(scaleX, scaleY);
+        logo.setScale(scale).setAlpha(0.3); // Set alpha to make it semi-transparent
+        
+        // Set background color (slightly darker than before to make logo visible)
+        this.cameras.main.setBackgroundColor('#000022');
 
         // Add title text
         this.add.text(this.cameras.main.centerX, 100, 'Debug Map Selection', {

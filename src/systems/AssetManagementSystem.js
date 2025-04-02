@@ -47,6 +47,9 @@ export default class AssetManagementSystem {
         this.tilesetMappings.set('../air_pocket1.png', 'air_pocket1');
         this.tilesetMappings.set('../air_pocket2.png', 'air_pocket2');
         this.tilesetMappings.set('../air_pocket3.png', 'air_pocket3');
+        this.tilesetMappings.set('../danger_currents_small.png', 'danger_currents_small');
+        this.tilesetMappings.set('danger_currents_small', 'danger_currents_small');
+        this.tilesetMappings.set('danger_currents_small.png', 'danger_currents_small');
 
         // Asset type mappings
         this.assetMappings.set('images', {
@@ -57,6 +60,7 @@ export default class AssetManagementSystem {
             'air_pocket1': 'air_pocket1.png',
             'air_pocket2': 'air_pocket2.png',
             'air_pocket3': 'air_pocket3.png',
+            'danger_currents_small': 'danger_currents_small.png',
             'player': 'diver2.png',
             'bubble': 'bubble.png',
             'heart': 'heart.png',
@@ -96,6 +100,7 @@ export default class AssetManagementSystem {
                     'air_pocket1',
                     'air_pocket2',
                     'air_pocket3',
+                    'danger_currents_small',
                     'player',
                     'bubble',
                     'heart',

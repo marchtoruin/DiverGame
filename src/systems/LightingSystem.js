@@ -491,8 +491,8 @@ export default class LightingSystem {
         // Make sure it stays on top of the game world
         this.overlay.setScrollFactor(0);
         
-        // Fix the overlay to the camera
-        this.overlay.setDepth(900);
+        // Fix the overlay to the camera with proper depth
+        this.overlay.setDepth(3); // Behind lights (5) but in front of Midground (2)
         
         // Make sure it's actually visible
         this.overlay.setVisible(true);
@@ -1764,6 +1764,13 @@ export default class LightingSystem {
         lightLayers.forEach(layer => {
             console.log(`Processing light layer: ${layer.name}`);
             
+            // Get the correct rendering depth from TilemapSystem if available
+            let renderDepth = 3; // Default if not specified
+            if (this.scene.tilemapSystem && this.scene.tilemapSystem.objectLayerDepths) {
+                renderDepth = this.scene.tilemapSystem.objectLayerDepths[layer.name] || renderDepth;
+                console.log(`Using renderDepth ${renderDepth} for light layer: ${layer.name}`);
+            }
+            
             // Process each object in the layer
             const lightObjects = layer.objects || [];
             
@@ -1794,7 +1801,8 @@ export default class LightingSystem {
                     blinking: getProperty(obj, 'blinking', false),
                     flickering: getProperty(obj, 'flickering', false),
                     texture: getProperty(obj, 'texture', null),
-                    image: getProperty(obj, 'image', null)
+                    image: getProperty(obj, 'image', null),
+                    depth: renderDepth // Add the layer's render depth to options
                 };
                 
                 console.log(`Light properties:`, lightOptions);
@@ -1804,6 +1812,18 @@ export default class LightingSystem {
                     obj.name?.toLowerCase().includes('pin_light')) {
                     console.log(`Creating pin light at (${obj.x}, ${obj.y})`);
                     const light = this.createPinLight(obj.x, obj.y, lightOptions);
+                    
+                    // Apply the render depth to all visual elements
+                    if (light.container) {
+                        light.container.setDepth(renderDepth);
+                    }
+                    if (light.visualLight) {
+                        light.visualLight.setDepth(renderDepth);
+                    }
+                    if (light.coreLight) {
+                        light.coreLight.setDepth(renderDepth);
+                    }
+                    
                     this.customLights.push(light);
                     totalLights++;
                     console.log('Pin light created successfully');
@@ -1812,6 +1832,19 @@ export default class LightingSystem {
                          obj.name?.toLowerCase().includes('ambient')) {
                     console.log(`Creating ambient light at (${obj.x}, ${obj.y})`);
                     const light = this.createAmbientLight(obj.x, obj.y, lightOptions);
+                    
+                    // Apply the render depth to ambient light visual elements
+                    if (light.container) {
+                        light.container.setDepth(renderDepth);
+                    }
+                    if (light.visualLight) {
+                        light.visualLight.setDepth(renderDepth);
+                    }
+                    if (light.lightCutout) {
+                        if (light.lightCutout.outerGlow) light.lightCutout.outerGlow.setDepth(renderDepth);
+                        if (light.lightCutout.innerGlow) light.lightCutout.innerGlow.setDepth(renderDepth);
+                    }
+                    
                     this.customLights.push(light);
                     totalLights++;
                     console.log('Ambient light created successfully');
@@ -1820,6 +1853,18 @@ export default class LightingSystem {
                          obj.name?.toLowerCase().includes('spotlight')) {
                     console.log(`Creating spotlight at (${obj.x}, ${obj.y})`);
                     const light = this.createSpotlight(obj.x, obj.y, lightOptions);
+                    
+                    // Apply the render depth to spotlight visual elements
+                    if (light.container) {
+                        light.container.setDepth(renderDepth);
+                    }
+                    if (light.visualLight) {
+                        light.visualLight.setDepth(renderDepth);
+                    }
+                    if (light.coneSprite) {
+                        light.coneSprite.setDepth(renderDepth);
+                    }
+                    
                     this.customLights.push(light);
                     totalLights++;
                     console.log('Spotlight created successfully');
@@ -2071,6 +2116,11 @@ export default class LightingSystem {
         visualLight.setTint(color);
         visualLight.setAlpha(intensity * 0.8);
         
+        // Explicitly disable any postFX blur that might be inherited
+        if (visualLight.postFX) {
+            visualLight.clearFX();
+        }
+        
         // Add visual light to container
         container.add(visualLight);
         
@@ -2088,6 +2138,12 @@ export default class LightingSystem {
         coreLight.setTint(color);
         coreLight.setAlpha(intensity * 1.2);
         coreLight.setBlendMode(Phaser.BlendModes.ADD);
+        
+        // Ensure no blur effect is applied to the core light
+        if (coreLight.postFX) {
+            coreLight.clearFX();
+        }
+        
         container.add(coreLight);
         
         // Create a mask that cuts through darkness
@@ -2335,6 +2391,11 @@ export default class LightingSystem {
             .setDepth(800) // Lower depth than pin lights
             .setOrigin(0.5, 0.5);
         
+        // Clear any inherited postFX blur
+        if (visualLight.postFX) {
+            visualLight.clearFX();
+        }
+        
         // Create a cutout in the darkness for this ambient light
         let lightCutout = null;
         if (this.overlay) {
@@ -2345,8 +2406,18 @@ export default class LightingSystem {
             const outerGlow = this.scene.add.circle(x, y, radius * 1.5, 0xffffff, 0.03);
             outerGlow.setDepth(this.overlay.depth - 1);
             
+            // Clear any postFX on the glow
+            if (outerGlow.postFX) {
+                outerGlow.clearFX();
+            }
+            
             const innerGlow = this.scene.add.circle(x, y, radius * 1.0, 0xffffff, 0.05);
             innerGlow.setDepth(this.overlay.depth - 1);
+            
+            // Clear any postFX on the inner glow
+            if (innerGlow.postFX) {
+                innerGlow.clearFX();
+            }
             
             // Place the visual light above the overlay
             visualLight.setDepth(this.overlay.depth + 1);
@@ -2452,6 +2523,11 @@ export default class LightingSystem {
         graphicsObject.lineTo(0, 0);
         graphicsObject.fillPath();
         
+        // Clear any postFX blur effect on the spotlight graphics
+        if (graphicsObject.postFX) {
+            graphicsObject.clearFX();
+        }
+        
         // Add the cone to the container
         container.add(graphicsObject);
         container.setRotation(direction);
@@ -2476,6 +2552,11 @@ export default class LightingSystem {
                 cutoutShape.arc(0, 0, gradLength, -gradAngle/2, gradAngle/2);
                 cutoutShape.lineTo(0, 0);
                 cutoutShape.fillPath();
+            }
+            
+            // Clear any postFX blur on the cutout shape
+            if (cutoutShape.postFX) {
+                cutoutShape.clearFX();
             }
             
             // Add to container

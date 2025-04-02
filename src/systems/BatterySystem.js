@@ -125,21 +125,12 @@ export default class BatterySystem {
      * Update the indicator light color based on current battery level
      */
     updateIndicatorColor() {
-        if (!this.scene.lightingSystem) return;
-
         // Find the appropriate color for current battery level
         const state = this.batteryStates.find(state => this.currentBattery > state.threshold);
         const color = state ? state.color : this.batteryStates[this.batteryStates.length - 1].color;
 
-        // Update both the point light and glow colors
-        if (this.scene.lightingSystem.flashlightPointLight) {
-            this.scene.lightingSystem.flashlightPointLight.setTint(color);
-        }
-        if (this.scene.lightingSystem.flashlightGlow) {
-            // Make glow slightly lighter
-            const glowColor = this.getLighterColor(color);
-            this.scene.lightingSystem.flashlightGlow.setTint(glowColor);
-        }
+        // Emit battery level changed event
+        this.scene.events.emit('batteryLevelChanged', this.currentBattery);
     }
 
     /**
@@ -161,6 +152,8 @@ export default class BatterySystem {
     turnOnFlashlight() {
         if (this.currentBattery > 0) {
             this.isFlashlightOn = true;
+            // Emit event instead of direct manipulation
+            this.scene.events.emit('flashlightStateChanged', true);
             return true;
         }
         return false;
@@ -171,9 +164,8 @@ export default class BatterySystem {
      */
     turnOffFlashlight() {
         this.isFlashlightOn = false;
-        if (this.scene.lightingSystem) {
-            this.scene.lightingSystem.toggleFlashlight();
-        }
+        // Emit event instead of direct manipulation
+        this.scene.events.emit('flashlightStateChanged', false);
     }
 
     /**
